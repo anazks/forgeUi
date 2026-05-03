@@ -1,16 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { 
-  Users, 
   Search, 
   ShieldCheck, 
   MapPin, 
-  ToggleLeft, 
-  ToggleRight, 
-  CreditCard,
-  AlertCircle,
-  Plus,
-  Loader2,
   DollarSign,
   TrendingUp,
   Activity,
@@ -18,7 +11,7 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { userApi, entityApi, paymentApi } from '../services/api';
+import { userApi, entityApi } from '../services/api';
 
 interface UsersPageProps {
   roleType?: 'CENTER' | 'KITCHEN' | 'STORE' | 'RESORT' | 'AGGRIGATE';
@@ -66,14 +59,6 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
     }
   };
 
-  const handleToggleStatus = async (userId: string) => {
-    try {
-      await userApi.toggleStatus(userId);
-      fetchUsers(currentUser);
-    } catch (err) {
-      setError('Toggle failed');
-    }
-  };
 
   if (isLoading) return <ForgeLoader />;
 
