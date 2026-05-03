@@ -1,0 +1,5 @@
+/* Scoped styles are handled in components or index.css */
+.app-container {
+  width: 100%;
+  min-height: 100vh;
+}
