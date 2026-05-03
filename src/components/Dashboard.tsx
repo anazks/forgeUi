@@ -2,14 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Plus, 
-  MapPin, 
-  User, 
   ChevronRight, 
   Loader2,
   Search,
   Building,
   DollarSign,
-  TrendingUp,
   Activity,
   ArrowUpRight,
   Users

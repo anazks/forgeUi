@@ -10,8 +10,7 @@ import {
   Edit2,
   RefreshCw,
   ToggleLeft,
-  ToggleRight,
-  DollarSign
+  ToggleRight
 } from 'lucide-react';
 import { entityApi, userApi, paymentApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
@@ -28,7 +27,7 @@ const EntityDetail: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [renewalData, setRenewalData] = useState({ amount: 0, duration: 1 });
   
-  const [newUser, setNewUser] = useState({
+  const [newUser, setNewUser] = useState<any>({
     name: '',
     email: '',
     password: '',

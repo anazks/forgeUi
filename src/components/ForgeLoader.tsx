@@ -1,5 +1,4 @@
 import React from 'react';
-import { Flame } from 'lucide-react';
 
 const ForgeLoader: React.FC = () => {
   const text = "FORGE";
