@@ -16,7 +16,7 @@ import { entityApi, userApi, paymentApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
 const EntityDetail: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { entityId: id } = useParams<{ entityId: string }>();
   const navigate = useNavigate();
   const [entity, setEntity] = useState<any>(null);
   const [admins, setAdmins] = useState<any[]>([]);

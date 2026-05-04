@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { 
   Search, 
   ShieldCheck, 
@@ -19,6 +19,7 @@ interface UsersPageProps {
 
 const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
   const navigate = useNavigate();
+  const { entityId } = useParams<{ entityId: string }>();
   
   const [users, setUsers] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,13 +31,28 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
     const userData = userStr ? JSON.parse(userStr) : null;
     setCurrentUser(userData);
     fetchUsers(userData);
-  }, [roleType]);
+  }, [roleType, entityId]);
 
   const fetchUsers = async (userData: any) => {
     try {
       setIsLoading(true);
       let res;
-      if (roleType === 'CENTER') {
+      if (entityId) {
+        // If entityId is in URL, fetch for that specific entity
+        if (roleType === 'CENTER') {
+          res = await userApi.getMyCenters(entityId);
+        } else if (roleType === 'KITCHEN') {
+          res = await userApi.getMyKitchens(entityId);
+        } else if (roleType === 'STORE') {
+          res = await userApi.getMyStores(entityId);
+        } else if (roleType === 'RESORT') {
+          res = await userApi.getMyResorts(entityId);
+        } else if (roleType === 'AGGRIGATE') {
+          res = await userApi.getMyAggregates(entityId);
+        } else {
+          res = await userApi.getAll(entityId);
+        }
+      } else if (roleType === 'CENTER') {
         res = await userApi.getMyCenters();
       } else if (roleType === 'KITCHEN') {
         res = await userApi.getMyKitchens();
@@ -49,7 +65,8 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
       } else if (userData?.role === 'SUPER_ADMIN') {
         res = await userApi.getAll();
       } else if (userData?.entity) {
-        res = await entityApi.getAdmins(userData.entity._id || userData.entity);
+        const id = userData.entity._id || userData.entity;
+        res = await entityApi.getAdmins(id);
       }
       setUsers(res?.data.data || []);
     } catch (err) {

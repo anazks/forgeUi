@@ -15,7 +15,11 @@ import {
   ChefHat,
   ShoppingBag,
   Palmtree,
-  Network
+  Network,
+  Settings2,
+  Package,
+  UtensilsCrossed,
+  Database
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -31,6 +35,28 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
 
+  // Detect if we are inside an entity-scoped route: /entity/:entityId/*
+  const entityMatch = location.pathname.match(/^\/entity\/([^/]+)/);
+  const activeEntityId = entityMatch ? entityMatch[1] : null;
+
+  // Build nav destination — entity-scoped if inside an entity, else global
+  const navTo = (globalPath: string, entitySubPath: string) => {
+    if (activeEntityId) {
+      navigate(`/entity/${activeEntityId}/${entitySubPath}`);
+    } else {
+      navigate(globalPath);
+    }
+  };
+
+  // Check if a path is "active" in entity-scoped or global context
+  const isActive = (globalPath: string, entitySubPath: string) => {
+    if (activeEntityId) {
+      return location.pathname === `/entity/${activeEntityId}/${entitySubPath}` ||
+             location.pathname === `/entity/${activeEntityId}`;
+    }
+    return location.pathname === globalPath;
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -40,6 +66,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const getInitials = (name: string) => {
     return name?.split(' ').map(n => n[0]).join('').toUpperCase() || '??';
   };
+
+  console.log("Current User Role:", user?.role);
+  console.log("Current Path:", location.pathname);
 
   return (
     <div className="dashboard-layout">
@@ -51,8 +80,47 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             </div>
             <span>FORGE PLATFORM</span>
           </div>
+          {/* Entity scope banner */}
+          {activeEntityId && (
+            <div className="entity-scope-banner">
+              <Building2 size={11} />
+              <span>ENTITY SCOPE</span>
+              <button className="scope-clear" onClick={() => navigate('/dashboard')} title="Back to global">✕</button>
+            </div>
+          )}
         </div>
         
+        {/* STORE role: minimal sidebar */}
+        {user?.role === 'STORE' ? (
+          <div className="sidebar-scrollable">
+            <div className="sidebar-section">
+              <p className="section-title">Store Manager</p>
+              <nav className="sidebar-nav">
+                <button
+                  className={`nav-item ${location.pathname === '/store-dashboard' ? 'active' : ''}`}
+                  onClick={() => navigate('/store-dashboard')}
+                >
+                  <Package size={18} />
+                  <span>Stock Dashboard</span>
+                </button>
+                <button
+                  className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`}
+                  onClick={() => navigate('/store-requests')}
+                >
+                  <UtensilsCrossed size={18} />
+                  <span>Food Requests</span>
+                </button>
+                <button
+                  className={`nav-item ${location.pathname === '/master-database' ? 'active' : ''}`}
+                  onClick={() => navigate('/master-database')}
+                >
+                  <Database size={18} />
+                  <span>Master Database</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+        ) : (
         <div className="sidebar-scrollable">
           <div className="sidebar-section">
             <p className="section-title">Operations</p>
@@ -64,67 +132,108 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <LayoutDashboard size={18} />
                 <span>Dashboard</span>
               </button>
+
               {user?.role === 'SUPER_ADMIN' && (
                 <button 
-                  className={`nav-item ${location.pathname.includes('/entity') ? 'active' : ''}`}
-                  onClick={() => navigate('/dashboard')}
+                  className={`nav-item ${activeEntityId && location.pathname === `/entity/${activeEntityId}` ? 'active' : ''}`}
+                  onClick={() => activeEntityId ? navigate(`/entity/${activeEntityId}`) : navigate('/dashboard')}
                 >
                   <Building2 size={18} />
                   <span>Entities</span>
                 </button>
               )}
+
               <button 
-                className={`nav-item ${location.pathname === '/users' ? 'active' : ''}`}
-                onClick={() => navigate('/users')}
+                className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`}
+                onClick={() => navTo('/users', 'users')}
               >
                 <Users size={18} />
                 <span>Users</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/menu' ? 'active' : ''}`}
-                onClick={() => navigate('/menu')}
+                className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`}
+                onClick={() => navTo('/menu', 'menu')}
               >
                 <MenuSquare size={18} />
                 <span>Menu</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/bom' ? 'active' : ''}`}
-                onClick={() => navigate('/bom')}
+                className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`}
+                onClick={() => navTo('/bom', 'bom')}
               >
                 <ClipboardList size={18} />
                 <span>BOM</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/centers' ? 'active' : ''}`}
-                onClick={() => navigate('/centers')}
+                className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`}
+                onClick={() => navTo('/item-config', 'item-config')}
+              >
+                <Settings2 size={18} />
+                <span>Item Config</span>
+              </button>
+
+              <button 
+                className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`}
+                onClick={() => navTo('/food-requests', 'food-requests')}
+              >
+                <UtensilsCrossed size={18} />
+                <span>Food Requests</span>
+              </button>
+
+              <button 
+                className={`nav-item ${isActive('/master-database', 'master-database') ? 'active' : ''}`}
+                onClick={() => navTo('/master-database', 'master-database')}
+              >
+                <Database size={18} />
+                <span>Master Database</span>
+              </button>
+
+              <button 
+                className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`}
+                onClick={() => navTo('/purchase', 'purchase')}
+              >
+                <ShoppingBag size={18} />
+                <span>Purchase</span>
+              </button>
+
+              <button 
+                className={`nav-item ${isActive('/centers', 'centers') ? 'active' : ''}`}
+                onClick={() => navTo('/centers', 'centers')}
               >
                 <Store size={18} />
                 <span>Centers</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/kitchens' ? 'active' : ''}`}
-                onClick={() => navigate('/kitchens')}
+                className={`nav-item ${isActive('/kitchens', 'kitchens') ? 'active' : ''}`}
+                onClick={() => navTo('/kitchens', 'kitchens')}
               >
                 <ChefHat size={18} />
                 <span>Kitchen</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/stores' ? 'active' : ''}`}
-                onClick={() => navigate('/stores')}
+                className={`nav-item ${isActive('/stores', 'stores') ? 'active' : ''}`}
+                onClick={() => navTo('/stores', 'stores')}
               >
                 <ShoppingBag size={18} />
                 <span>Store</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/resorts' ? 'active' : ''}`}
-                onClick={() => navigate('/resorts')}
+                className={`nav-item ${isActive('/resorts', 'resorts') ? 'active' : ''}`}
+                onClick={() => navTo('/resorts', 'resorts')}
               >
                 <Palmtree size={18} />
                 <span>Resort</span>
               </button>
+
               <button 
-                className={`nav-item ${location.pathname === '/aggregates' ? 'active' : ''}`}
-                onClick={() => navigate('/aggregates')}
+                className={`nav-item ${isActive('/aggregates', 'aggregates') ? 'active' : ''}`}
+                onClick={() => navTo('/aggregates', 'aggregates')}
               >
                 <Network size={18} />
                 <span>Aggregate</span>
@@ -146,6 +255,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             </nav>
           </div>
         </div>
+        )} {/* end STORE ternary */}
       </aside>
 
       <div className="dashboard-content">
@@ -203,6 +313,23 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           background: var(--bg-sidebar);
           flex-shrink: 0;
         }
+        .entity-scope-banner {
+          margin: 0 12px 12px;
+          padding: 6px 10px;
+          background: rgba(249,115,22,0.08);
+          border: 1px solid rgba(249,115,22,0.2);
+          border-radius: 2px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 0.6rem;
+          font-weight: 800;
+          color: var(--primary);
+          letter-spacing: 0.5px;
+        }
+        .entity-scope-banner span { flex: 1; }
+        .scope-clear { background: none; border: none; color: var(--primary); cursor: pointer; font-size: 0.75rem; padding: 0; line-height: 1; opacity: 0.7; }
+        .scope-clear:hover { opacity: 1; }
         .sidebar-brand {
           padding: 0 20px;
           display: flex;

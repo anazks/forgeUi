@@ -9,9 +9,11 @@ import {
   DollarSign,
   Activity,
   ArrowUpRight,
-  Users
+  Users,
+  Bell,
+  Info
 } from 'lucide-react';
-import { entityApi, paymentApi } from '../services/api';
+import { entityApi, paymentApi, eventApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
 const Dashboard: React.FC = () => {
@@ -25,6 +27,7 @@ const Dashboard: React.FC = () => {
   const [user, setUser] = useState<any>(null);
 
   const [adminPersonnel, setAdminPersonnel] = useState<any[]>([]);
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
 
   const fetchData = async () => {
     try {
@@ -32,6 +35,9 @@ const Dashboard: React.FC = () => {
       const userStr = localStorage.getItem('user');
       const userData = userStr ? JSON.parse(userStr) : null;
       setUser(userData);
+
+      const eventRes = await eventApi.getUpcoming();
+      setUpcomingEvents(eventRes.data.data || []);
 
       if (userData?.role === 'SUPER_ADMIN') {
         const [entityRes, paymentRes] = await Promise.all([
@@ -63,6 +69,13 @@ const Dashboard: React.FC = () => {
       navigate('/login');
       return;
     }
+    // STORE managers have their own dedicated dashboard
+    const userStr = localStorage.getItem('user');
+    const userData = userStr ? JSON.parse(userStr) : null;
+    if (userData?.role === 'STORE') {
+      navigate('/store-dashboard');
+      return;
+    }
     fetchData();
   }, []);
 
@@ -91,10 +104,31 @@ const Dashboard: React.FC = () => {
           </div>
           {user?.role === 'SUPER_ADMIN' && (
             <button className="btn-primary" onClick={() => setIsAdding(true)}>
-              <Plus size={16} /> NEW BUSINESS UNIT
+              <Plus size={16} /> REGISTER UNIT
             </button>
           )}
         </header>
+
+        {/* Upcoming Event Notifications */}
+        {upcomingEvents.length > 0 && (
+          <div className="event-notification-bar">
+            {upcomingEvents.map(ev => (
+              <div key={ev._id} className="event-alert-card">
+                <div className="alert-icon-wrap">
+                  <Bell className="bell-pulse" size={18} />
+                </div>
+                <div className="alert-text">
+                  <p className="alert-label">UPCOMING TOMORROW</p>
+                  <h3 className="alert-title">{ev.eventName.toUpperCase()}</h3>
+                  <p className="alert-desc">{ev.description || 'No additional details provided.'}</p>
+                </div>
+                <div className="alert-type-badge">
+                  {ev.type}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {user?.role === 'SUPER_ADMIN' ? (
           <section className="stats-grid">
@@ -246,6 +280,18 @@ const Dashboard: React.FC = () => {
         .main-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; }
         .header-title h1 { font-size: 1.5rem; letter-spacing: 2px; }
         .subtitle { color: var(--text-dim); font-size: 0.8rem; font-weight: 700; margin-top: 4px; }
+
+        .event-notification-bar { margin-bottom: 32px; display: flex; flex-direction: column; gap: 12px; }
+        .event-alert-card { background: rgba(249, 115, 22, 0.03); border: 1px solid rgba(249, 115, 22, 0.2); padding: 16px 24px; display: flex; align-items: center; gap: 20px; position: relative; overflow: hidden; }
+        .event-alert-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--primary); }
+        .alert-icon-wrap { width: 40px; height: 40px; background: rgba(249, 115, 22, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--primary); }
+        .bell-pulse { animation: alert-pulse 2s infinite; }
+        @keyframes alert-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+        .alert-text { flex: 1; }
+        .alert-label { font-size: 0.6rem; font-weight: 900; color: var(--primary); letter-spacing: 2px; margin-bottom: 2px; }
+        .alert-title { font-size: 1rem; font-weight: 800; color: var(--text-main); margin-bottom: 4px; }
+        .alert-desc { font-size: 0.75rem; color: var(--text-dim); font-weight: 600; }
+        .alert-type-badge { font-size: 0.65rem; font-weight: 900; color: var(--text-dim); background: rgba(0,0,0,0.2); padding: 4px 10px; border: 1px solid var(--border-main); }
 
         .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 40px; }
         .stat-card { border: 1px solid var(--border-main); padding: 24px; display: flex; align-items: center; gap: 20px; position: relative; }

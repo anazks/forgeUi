@@ -21,7 +21,12 @@ const LoginPage: React.FC = () => {
       const { token, user } = response.data;
       localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(user));
-      navigate('/dashboard');
+      // Role-based routing
+      if (user.role === 'STORE') {
+        navigate('/store-dashboard');
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err: any) {
       setError(err.response?.data?.error || 'AUTHENTICATION FAILED');
     } finally {
