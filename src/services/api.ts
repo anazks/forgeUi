@@ -39,12 +39,15 @@ export const userApi = {
 export const entityApi = {
   getAll: () => api.get('/entities'),
   create: (data: any) => api.post('/entities', data),
+  update: (entityId: string, data: any) => api.put(`/entities/${entityId}`, data),
   addAdmin: (entityId: string, data: any) => api.post(`/entities/${entityId}/add-admin`, data),
   getAdmins: (entityId: string) => api.get(`/entities/${entityId}/admins`),
+  getUpcomingRenewals: () => api.get('/entities/upcoming-renewals'),
 };
 
 export const paymentApi = {
   getStats: () => api.get('/payments/stats'),
+  getMonthlyRevenue: (year: number) => api.get(`/payments/monthly?year=${year}`),
   manualRenewal: (data: { adminId: string; amount: number; duration: number; paymentType?: string }) => 
     api.post('/payments/manual-renewal', data),
 };
