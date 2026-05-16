@@ -11,15 +11,17 @@ import {
   ArrowUpRight,
   Users,
   Bell,
-  Info
+  Info,
+  Clock
 } from 'lucide-react';
-import { entityApi, paymentApi, eventApi } from '../services/api';
+import { entityApi, paymentApi, eventApi, financeApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [entities, setEntities] = useState<any[]>([]);
   const [stats, setStats] = useState({ totalRevenue: 0, recentPayments: [] });
+  const [financeStats, setFinanceStats] = useState({ totalIncome: 0, totalExpense: 0, netBalance: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [newEntity, setNewEntity] = useState({ username: '', name: '', location: '', password: 'password123' });
@@ -46,14 +48,25 @@ const Dashboard: React.FC = () => {
         ]);
         setEntities(entityRes.data.data);
         setStats(paymentRes.data);
+      } else if (userData?.role === 'RESORT') {
+        const [finRes] = await Promise.all([
+          financeApi.getStats()
+        ]);
+        setFinanceStats(finRes.data.data);
+        setEntities([userData.entity]);
       } else if (userData?.entity) {
         // Use populated entity from user data if available
         const userEntity = userData.entity;
         setEntities([userEntity]);
         
-        // Still need to fetch personnel for the unit
-        const personnelRes = await entityApi.getAdmins(userEntity._id || userEntity);
-        setAdminPersonnel(personnelRes.data.data);
+        // Skip getAdmins if role is CENTERS to avoid 403
+        if (userData.role !== 'CENTERS') {
+          const personnelRes = await entityApi.getAdmins(userEntity._id || userEntity);
+          setAdminPersonnel(personnelRes.data.data);
+        } else {
+          setAdminPersonnel([]);
+        }
+        
         setStats({ totalRevenue: 0, recentPayments: [] });
       }
     } catch (err: any) {
@@ -155,30 +168,91 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </section>
+        ) : user?.role === 'RESORT' ? (
+          <>
+            <section className="stats-grid">
+              <div className="stat-card">
+                <div className="stat-icon" style={{ color: '#10b981' }}><DollarSign size={20} /></div>
+                <div className="stat-info">
+                  <label>RESORT INCOME (TOTAL)</label>
+                  <h3>₹{financeStats.totalIncome.toLocaleString()}</h3>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon" style={{ color: '#ef4444' }}><Activity size={20} /></div>
+                <div className="stat-info">
+                  <label>RESORT EXPENSE (TOTAL)</label>
+                  <h3>₹{financeStats.totalExpense.toLocaleString()}</h3>
+                </div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-icon" style={{ color: 'var(--primary)' }}><ArrowUpRight size={20} /></div>
+                <div className="stat-info">
+                  <label>NET BALANCE</label>
+                  <h3>₹{financeStats.netBalance.toLocaleString()}</h3>
+                </div>
+              </div>
+            </section>
+
+            <div className="data-panel" style={{ marginBottom: '32px' }}>
+              <div className="panel-header" style={{ background: 'rgba(249, 115, 22, 0.05)' }}>
+                <h2 style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Clock size={14} /> TODAY'S CLOSING SUMMARY
+                </h2>
+              </div>
+              <div style={{ padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                <div className="stat-card" style={{ background: 'rgba(0,0,0,0.1)' }}>
+                  <div className="stat-info">
+                    <label>INCOME TODAY</label>
+                    <h3 style={{ color: '#10b981' }}>₹{financeStats.todayIncome?.toLocaleString() || '0'}</h3>
+                  </div>
+                </div>
+                <div className="stat-card" style={{ background: 'rgba(0,0,0,0.1)' }}>
+                  <div className="stat-info">
+                    <label>EXPENSE TODAY</label>
+                    <h3 style={{ color: '#ef4444' }}>₹{financeStats.todayExpense?.toLocaleString() || '0'}</h3>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
         ) : (
           <section className="stats-grid">
             <div className="stat-card">
               <div className="stat-icon"><Building size={20} /></div>
               <div className="stat-info">
-                <label>MY BUSINESS UNIT</label>
+                <label>{user?.role === 'CENTERS' ? 'MY CENTER' : 'MY BUSINESS UNIT'}</label>
                 <h3>{entities[0]?.name?.toUpperCase() || 'UNLINKED'}</h3>
               </div>
             </div>
-            <div className="stat-card">
-              <div className="stat-icon"><Users size={20} /></div>
-              <div className="stat-info">
-                <label>ACTIVE PERSONNEL</label>
-                <h3>{adminPersonnel.length}</h3>
+            {user?.role === 'CENTERS' ? (
+              <div className="stat-card clickable" onClick={() => navigate('/food-requests')}>
+                <div className="stat-icon"><Activity size={20} /></div>
+                <div className="stat-info">
+                  <label>MY REQUESTS</label>
+                  <h3>VIEW STATUS</h3>
+                </div>
+                <div className="stat-trend"><ChevronRight size={14} /></div>
               </div>
-            </div>
-            <div className="stat-card clickable" onClick={() => navigate(`/entity/${user?.entity}`)}>
-              <div className="stat-icon"><Activity size={20} /></div>
-              <div className="stat-info">
-                <label>OPERATIONAL STATUS</label>
-                <h3>ACTIVE</h3>
+            ) : (
+              <div className="stat-card">
+                <div className="stat-icon"><Users size={20} /></div>
+                <div className="stat-info">
+                  <label>ACTIVE PERSONNEL</label>
+                  <h3>{adminPersonnel.length}</h3>
+                </div>
               </div>
-              <div className="stat-trend"><ChevronRight size={14} /></div>
-            </div>
+            )}
+            {user?.role !== 'CENTERS' && (
+              <div className="stat-card clickable" onClick={() => navigate(`/entity/${user?.entity}`)}>
+                <div className="stat-icon"><Activity size={20} /></div>
+                <div className="stat-info">
+                  <label>OPERATIONAL STATUS</label>
+                  <h3>ACTIVE</h3>
+                </div>
+                <div className="stat-trend"><ChevronRight size={14} /></div>
+              </div>
+            )}
           </section>
         )}
 

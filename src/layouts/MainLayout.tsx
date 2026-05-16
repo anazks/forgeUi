@@ -19,7 +19,10 @@ import {
   Settings2,
   Package,
   UtensilsCrossed,
-  Database
+  Database,
+  CreditCard,
+  TrendingDown,
+  DollarSign
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
@@ -90,8 +93,30 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           )}
         </div>
         
-        {/* STORE role: minimal sidebar */}
-        {user?.role === 'STORE' ? (
+        {/* RESORT role: minimal sidebar */}
+        {user?.role === 'RESORT' ? (
+          <div className="sidebar-scrollable">
+            <div className="sidebar-section">
+              <p className="section-title">Resort Manager</p>
+              <nav className="sidebar-nav">
+                <button
+                  className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`}
+                  onClick={() => navigate('/dashboard')}
+                >
+                  <LayoutDashboard size={18} />
+                  <span>Dashboard</span>
+                </button>
+                <button
+                  className={`nav-item ${location.pathname === '/finance' ? 'active' : ''}`}
+                  onClick={() => navigate('/finance')}
+                >
+                  <DollarSign size={18} />
+                  <span>Finance</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+        ) : user?.role === 'STORE' ? (
           <div className="sidebar-scrollable">
             <div className="sidebar-section">
               <p className="section-title">Store Manager</p>
@@ -109,6 +134,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 >
                   <UtensilsCrossed size={18} />
                   <span>Food Requests</span>
+                  <span className="nav-notification-dot"></span>
+                </button>
+                <button
+                  className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`}
+                  onClick={() => navigate('/purchase')}
+                >
+                  <ShoppingBag size={18} />
+                  <span>New Purchase</span>
                 </button>
                 <button
                   className={`nav-item ${location.pathname === '/master-database' ? 'active' : ''}`}
@@ -133,71 +166,110 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <span>Dashboard</span>
               </button>
 
-              {user?.role === 'SUPER_ADMIN' && (
-                <button 
-                  className={`nav-item ${activeEntityId && location.pathname === `/entity/${activeEntityId}` ? 'active' : ''}`}
-                  onClick={() => activeEntityId ? navigate(`/entity/${activeEntityId}`) : navigate('/dashboard')}
-                >
-                  <Building2 size={18} />
-                  <span>Entities</span>
-                </button>
-              )}
+              {user?.role === 'CENTERS' ? (
+                <>
+                  <button 
+                    className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`}
+                    onClick={() => navTo('/menu', 'menu')}
+                  >
+                    <MenuSquare size={18} />
+                    <span>Menu</span>
+                  </button>
+                  <button 
+                    className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`}
+                    onClick={() => navTo('/food-requests', 'food-requests')}
+                  >
+                    <UtensilsCrossed size={18} />
+                    <span>My Requests</span>
+                  </button>
+                  <button 
+                    className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`}
+                    onClick={() => navTo('/wastage', 'wastage')}
+                  >
+                    <TrendingDown size={18} />
+                    <span>Wastage Management</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  {user?.role === 'SUPER_ADMIN' && (
+                    <button 
+                      className={`nav-item ${activeEntityId && location.pathname === `/entity/${activeEntityId}` ? 'active' : ''}`}
+                      onClick={() => activeEntityId ? navigate(`/entity/${activeEntityId}`) : navigate('/dashboard')}
+                    >
+                      <Building2 size={18} />
+                      <span>Entities</span>
+                    </button>
+                  )}
 
-              <button 
-                className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`}
-                onClick={() => navTo('/users', 'users')}
-              >
-                <Users size={18} />
-                <span>Users</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`}
+                    onClick={() => navTo('/users', 'users')}
+                  >
+                    <Users size={18} />
+                    <span>Users</span>
+                  </button>
 
-              <button 
-                className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`}
-                onClick={() => navTo('/menu', 'menu')}
-              >
-                <MenuSquare size={18} />
-                <span>Menu</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`}
+                    onClick={() => navTo('/menu', 'menu')}
+                  >
+                    <MenuSquare size={18} />
+                    <span>Menu</span>
+                  </button>
 
-              <button 
-                className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`}
-                onClick={() => navTo('/bom', 'bom')}
-              >
-                <ClipboardList size={18} />
-                <span>BOM</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`}
+                    onClick={() => navTo('/bom', 'bom')}
+                  >
+                    <ClipboardList size={18} />
+                    <span>BOM</span>
+                  </button>
 
-              <button 
-                className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`}
-                onClick={() => navTo('/item-config', 'item-config')}
-              >
-                <Settings2 size={18} />
-                <span>Item Config</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`}
+                    onClick={() => navTo('/item-config', 'item-config')}
+                  >
+                    <Settings2 size={18} />
+                    <span>Item Config</span>
+                  </button>
 
-              <button 
-                className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`}
-                onClick={() => navTo('/food-requests', 'food-requests')}
-              >
-                <UtensilsCrossed size={18} />
-                <span>Food Requests</span>
-              </button>
+                  {(user?.role === 'COO' || user?.role === 'SUPER_ADMIN') && (
+                    <button 
+                      className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`}
+                      onClick={() => navTo('/food-requests', 'food-requests')}
+                    >
+                      <UtensilsCrossed size={18} />
+                      <span>Food Requests</span>
+                    </button>
+                  )}
 
-              <button 
-                className={`nav-item ${isActive('/master-database', 'master-database') ? 'active' : ''}`}
-                onClick={() => navTo('/master-database', 'master-database')}
-              >
-                <Database size={18} />
-                <span>Master Database</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/master-database', 'master-database') ? 'active' : ''}`}
+                    onClick={() => navTo('/master-database', 'master-database')}
+                  >
+                    <Database size={18} />
+                    <span>Master Database</span>
+                  </button>
 
-              <button 
-                className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`}
-                onClick={() => navTo('/purchase', 'purchase')}
-              >
-                <ShoppingBag size={18} />
-                <span>Purchase</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`}
+                    onClick={() => navTo('/purchase', 'purchase')}
+                  >
+                    <ShoppingBag size={18} />
+                    <span>Purchase</span>
+                  </button>
+
+                  {(user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') && (
+                    <button 
+                      className={`nav-item ${isActive('/payment-settings', 'payment-settings') ? 'active' : ''}`}
+                      onClick={() => navTo('/payment-settings', 'payment-settings')}
+                    >
+                      <CreditCard size={18} />
+                      <span>Payment Settings</span>
+                    </button>
+                  )}
+
 
               <button 
                 className={`nav-item ${isActive('/centers', 'centers') ? 'active' : ''}`}
@@ -231,32 +303,36 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <span>Resort</span>
               </button>
 
-              <button 
-                className={`nav-item ${isActive('/aggregates', 'aggregates') ? 'active' : ''}`}
-                onClick={() => navTo('/aggregates', 'aggregates')}
-              >
-                <Network size={18} />
-                <span>Aggregate</span>
-              </button>
+                  <button 
+                    className={`nav-item ${isActive('/aggregates', 'aggregates') ? 'active' : ''}`}
+                    onClick={() => navTo('/aggregates', 'aggregates')}
+                  >
+                    <Network size={18} />
+                    <span>Aggregate</span>
+                  </button>
+                </>
+              )}
             </nav>
           </div>
-
-          <div className="sidebar-section">
-            <p className="section-title">System</p>
-            <nav className="sidebar-nav">
-              <button className="nav-item">
-                <Settings size={18} />
-                <span>Settings</span>
-              </button>
-              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-              </button>
-            </nav>
-          </div>
+    
+          {user?.role !== 'CENTERS' && (
+            <div className="sidebar-section">
+              <p className="section-title">System</p>
+              <nav className="sidebar-nav">
+                <button className="nav-item">
+                  <Settings size={18} />
+                  <span>Settings</span>
+                </button>
+                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+                </button>
+              </nav>
+            </div>
+          )}
         </div>
-        )} {/* end STORE ternary */}
-      </aside>
+      )} {/* end STORE ternary */}
+        </aside>
 
       <div className="dashboard-content">
         <header className="top-bar">
@@ -480,6 +556,15 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           background: var(--row-hover);
           border-left: 2px solid var(--primary);
           padding-left: 10px;
+        }
+
+        .nav-notification-dot {
+          width: 6px;
+          height: 6px;
+          background: #ef4444;
+          border-radius: 50%;
+          margin-left: auto;
+          box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
         }
         
         .dashboard-main { 

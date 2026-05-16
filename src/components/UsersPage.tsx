@@ -62,7 +62,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
         res = await userApi.getMyResorts();
       } else if (roleType === 'AGGRIGATE') {
         res = await userApi.getMyAggregates();
-      } else if (userData?.role === 'SUPER_ADMIN') {
+      } else if (userData?.role === 'SUPER_ADMIN' || userData?.role === 'COO') {
         res = await userApi.getAll();
       } else if (userData?.entity) {
         const id = userData.entity._id || userData.entity;

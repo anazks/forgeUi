@@ -116,9 +116,6 @@ const StoreDashboard: React.FC = () => {
           </div>
         </div>
         <div className="flex-center gap-2">
-          <button className="btn-primary" onClick={() => navigate('/purchase')}>
-            <ShoppingBag size={14} /> NEW PURCHASE
-          </button>
           <button className="btn-refresh" onClick={fetchMaterials}>
             <RefreshCw size={14} /> REFRESH
           </button>
@@ -300,8 +297,9 @@ const StoreDashboard: React.FC = () => {
         .store-sub { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; }
         .store-sub strong { color: var(--primary); }
         .last-updated { font-size: 0.65rem; color: var(--text-dim); margin-bottom: 20px; letter-spacing: 0.3px; }
-        .btn-refresh { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 8px 16px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
+        .btn-refresh { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 10px 20px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
         .btn-refresh:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-primary { padding: 10px 20px !important; }
 
         /* Alert Panel */
         .alert-panel { background: rgba(239,68,68,0.03); border: 1px solid rgba(239,68,68,0.2); margin-bottom: 24px; }
