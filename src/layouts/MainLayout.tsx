@@ -48,7 +48,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
 
   const isActive = (globalPath: string, entitySubPath: string) => {
     if (activeEntityId) {
-      return location.pathname === `//entity/${activeEntityId}/${entitySubPath}` ||
+      return location.pathname === `/entity/${activeEntityId}/${entitySubPath}` ||
              location.pathname === `/entity/${activeEntityId}`;
     }
     return location.pathname === globalPath;
