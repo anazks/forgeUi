@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { foodRequestApi } from '../services/api';
+import { foodRequestApi, userApi, vendorApi, purchaseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
   Plus, RefreshCw, CheckCircle, XCircle, Clock,
@@ -54,7 +54,18 @@ const FoodRequestPage: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [demandSummary, setDemandSummary] = useState<{ menus: any[], materials: any[] }>({ menus: [], materials: [] });
+  const [demandSummary, setDemandSummary] = useState<{ totalOpenDemands: number, items: any[] }>({ totalOpenDemands: 0, items: [] });
+  const [locations, setLocations] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<any[]>([]);
+  const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
+  
+  // Bulk PR State
+  const [selectedForPr, setSelectedForPr] = useState<Record<string, boolean>>({});
+  const [vendorForPr, setVendorForPr] = useState<Record<string, string>>({});
+  const [orderQuantities, setOrderQuantities] = useState<Record<string, number>>({});
+  const [raisedPrs, setRaisedPrs] = useState<Record<string, boolean>>({});
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+
   const [summaryDate, setSummaryDate] = useState(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -75,15 +86,107 @@ const FoodRequestPage: React.FC = () => {
   }, [entityId]);
 
   useEffect(() => {
-    if (!isCenter) fetchDemand();
+    if (!isCenter) {
+      fetchDemand();
+      fetchLocationsAndVendors();
+    }
   }, [entityId, summaryDate]);
+
+  const fetchLocationsAndVendors = async () => {
+    try {
+      const [locRes, venRes] = await Promise.all([
+        userApi.getLocations(entityId),
+        vendorApi.getAll()
+      ]);
+      const locs = locRes.data.data || [];
+      setLocations(locs);
+      setVendors(venRes.data.data || []);
+      
+      if (isStore && locs.length > 0 && selectedLocation === 'ALL') {
+        setSelectedLocation(locs[0]._id);
+      }
+    } catch (err) {
+      console.error('Failed to load locations/vendors', err);
+    }
+  };
 
   const fetchDemand = async () => {
     try {
       const res = await foodRequestApi.getDemandSummary(entityId, summaryDate);
-      setDemandSummary(res.data.data || { menus: [], materials: [] });
+      const data = res.data.data || { totalOpenDemands: 0, items: [] };
+      setDemandSummary(data);
+
+      // Auto-initialize order quantities with MOQ
+      const initialQtys: Record<string, number> = {};
+      data.items.forEach((item: any) => {
+        if (item.type === 'MATERIAL' && item.gap > 0) {
+          initialQtys[`${item.materialId}-${item.locationId}`] = item.moq || 0;
+        }
+      });
+      setOrderQuantities(initialQtys);
     } catch (err) {
       console.error('Failed to fetch demand summary:', err);
+    }
+  };
+
+  const handleBulkRaisePR = async () => {
+    // Collect all checked items
+    const selectedItems = demandSummary.items.filter(
+      (item: any) => item.type === 'MATERIAL' && item.gap > 0 && selectedForPr[`${item.materialId}-${item.locationId}`] && !raisedPrs[`${item.materialId}-${item.locationId}`]
+    );
+
+    if (selectedItems.length === 0) {
+      showToast('No items selected for PR', 'warn');
+      return;
+    }
+
+    // Validate vendors are selected
+    const missingVendor = selectedItems.find(i => !vendorForPr[`${i.materialId}-${i.locationId}`]);
+    if (missingVendor) {
+      showToast(`Please select a vendor for ${missingVendor.name}`, 'error');
+      return;
+    }
+
+    try {
+      setIsBulkProcessing(true);
+      
+      // Group by Vendor and Location
+      const groupedByVendorAndLoc: Record<string, any[]> = {};
+      selectedItems.forEach(item => {
+        const vId = vendorForPr[`${item.materialId}-${item.locationId}`];
+        const lId = item.locationId;
+        const key = `${vId}_${lId}`;
+        if (!groupedByVendorAndLoc[key]) groupedByVendorAndLoc[key] = { vendorId: vId, locationId: lId, items: [] };
+        groupedByVendorAndLoc[key].items.push(item);
+      });
+
+      // Submit each PR
+      await Promise.all(Object.values(groupedByVendorAndLoc).map(group => {
+        return purchaseApi.createRequest({
+          vendorId: group.vendorId,
+          destinationLocation: group.locationId,
+          items: group.items.map((i: any) => ({
+            item: i.materialId,
+            itemName: i.name,
+            requestedQty: orderQuantities[`${i.materialId}-${i.locationId}`] !== undefined ? orderQuantities[`${i.materialId}-${i.locationId}`] : i.gap,
+            unit: i.unit
+          }))
+        });
+      }));
+
+      // Mark as raised
+      const newRaised = { ...raisedPrs };
+      selectedItems.forEach(item => {
+        newRaised[`${item.materialId}-${item.locationId}`] = true;
+      });
+      setRaisedPrs(newRaised);
+      setSelectedForPr({});
+      
+      showToast('Purchase Requests generated successfully!', 'success');
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to create PRs', 'error');
+    } finally {
+      setIsBulkProcessing(false);
     }
   };
 
@@ -97,7 +200,7 @@ const FoodRequestPage: React.FC = () => {
       setIsLoading(true);
       const res = await foodRequestApi.getAll(entityId);
       const data = res.data.data || [];
-      setRequests(data.length === 0 ? mockRequests : data);
+      setRequests(data);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load requests');
     } finally {
@@ -192,14 +295,11 @@ const FoodRequestPage: React.FC = () => {
 
       <header className="page-header">
         <div className="header-title">
-          <h1>FOOD REQUESTS</h1>
-          <p className="subtitle">REQUESTS FROM CENTERS — STOCK VERIFICATION &amp; APPROVAL</p>
+          <h1>{isStore ? 'STOCK REQUESTS' : 'FOOD REQUESTS'}</h1>
+          <p className="subtitle">{isStore ? 'GAP ANALYSIS & PR GENERATION' : 'REQUESTS FROM CENTERS — STOCK VERIFICATION & APPROVAL'}</p>
         </div>
         <div className="header-actions">
-          <button className="btn-seed" onClick={handleSeedSample} disabled={seeding}>
-            {seeding ? <Loader2 size={14} className="spin" /> : <Beaker size={14} />}
-            CREATE SAMPLE REQUESTS
-          </button>
+
           <button className="btn-refresh" onClick={fetchRequests}>
             <RefreshCw size={14} /> REFRESH
           </button>
@@ -251,89 +351,139 @@ const FoodRequestPage: React.FC = () => {
                       <Package size={14} />
                       <span>TOTAL DEMAND ACROSS ALL PENDING REQUESTS FOR SELECTED DATE</span>
                     </div>
-                    <p className="info-desc">Consolidated view of all menu items and raw materials needed for selected date.</p>
+                    <p className="info-desc">Consolidated Gap Analysis separated by preparation location.</p>
                   </div>
-                  <div className="header-date-picker">
-                    <label>DELIVERY DATE:</label>
-                    <input
-                      type="date"
-                      value={summaryDate}
-                      onChange={(e) => setSummaryDate(e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Menu Items */}
-              <div className="consolidated-section">
-                <h3 className="section-title"><Clock size={14} /> MENU ITEM PRODUCTION DEMAND</h3>
-                <div className="demand-grid consolidated">
-                  {demandSummary.menus.length === 0 ? (
-                    <div className="demand-empty">No menu items requested.</div>
-                  ) : (
-                    demandSummary.menus.map((item: any, idx: number) => (
-                      <div key={`menu-${idx}`} className="demand-card consolidated menu-type">
-                        <div className="demand-card-header">
-                          <span className="demand-name">{item.name.toUpperCase()}</span>
-                          <div className="demand-qty-group">
-                            <span className="demand-qty">{item.totalQty.toFixed(2)}</span>
-                            <span className="demand-vs">{item.unit?.toUpperCase()}</span>
-                          </div>
-                        </div>
-                        <div className="demand-footer">
-                          <span className="status-label production">TO BE PRODUCED</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Raw Materials */}
-              <div className="consolidated-section" style={{ marginTop: '32px' }}>
-                <h3 className="section-title"><Beaker size={14} /> RAW MATERIAL / INGREDIENT DEMAND</h3>
-                <div className="demand-grid consolidated">
-                  {demandSummary.materials.length === 0 ? (
-                    <div className="demand-empty">No material demand found.</div>
-                  ) : (
-                    demandSummary.materials.map((item: any, idx: number) => {
-                      const stock = item.currentStock || 0;
-                      const isSufficient = stock >= item.totalQty;
-                      const percent = item.totalQty > 0 ? Math.min((stock / item.totalQty) * 100, 100) : 100;
-                      return (
-                        <div key={`mat-${idx}`} className={`demand-card consolidated ${isSufficient ? 'demand-suff' : 'demand-insuff'}`}>
-                          <div className="demand-card-header">
-                            <span className="demand-name">{item.name.toUpperCase()}</span>
-                            <div className="demand-qty-group">
-                              <span className="demand-qty">{item.totalQty.toFixed(2)}</span>
-                              <span className="demand-vs">/</span>
-                              <span className={`demand-stock ${isSufficient ? 'txt-suff' : 'txt-insuff'}`}>{stock.toFixed(2)} {item.unit?.toUpperCase()}</span>
-                            </div>
-                          </div>
-                          <div className="demand-progress-bg">
-                            <div className={`demand-progress-fill ${isSufficient ? 'bg-suff' : 'bg-insuff'}`} style={{ width: `${percent}%` }} />
-                          </div>
-                          <div className="demand-footer">
-                            {isSufficient ? (
-                              <span className="status-label ok"><CheckCircle size={10} /> IN STOCK</span>
-                            ) : (
-                              <span className="status-label short"><AlertTriangle size={10} /> SHORT: {(item.totalQty - stock).toFixed(2)}</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {pending.length > 0 && (
-                  <div className="consolidated-actions">
-                    <div className="action-hint">
-                      <AlertTriangle size={14} />
-                      <span>Review shortages above before approving individual requests in the next tab.</span>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <div className="header-date-picker">
+                      <label>LOCATION:</label>
+                      <select 
+                        value={selectedLocation} 
+                        onChange={(e) => setSelectedLocation(e.target.value)}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontWeight: 800, outline: 'none' }}
+                      >
+                        {!isStore && <option value="ALL">ALL LOCATIONS</option>}
+                        {locations.map(loc => (
+                          <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="header-date-picker">
+                      <label>DELIVERY DATE:</label>
+                      <input
+                        type="date"
+                        value={summaryDate}
+                        onChange={(e) => setSummaryDate(e.target.value)}
+                      />
                     </div>
                   </div>
-                )}
+                </div>
+                
+                {/* Total Open Demands Metric Card */}
+                <div style={{ marginTop: '20px', padding: '16px', background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '12px', borderRadius: '50%', color: '#ef4444' }}>
+                    <AlertTriangle size={24} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#ef4444', margin: 0 }}>{demandSummary.totalOpenDemands}</h3>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)', margin: 0 }}>ACTIONABLE RAW MATERIAL SHORTAGES (ACROSS ALL LOCATIONS)</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Aggregated Demands */}
+              <div className="consolidated-section">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                  <h3 className="section-title"><Beaker size={14} /> STOCK REQUESTS</h3>
+                  <button 
+                    className="btn-seed" 
+                    onClick={handleBulkRaisePR}
+                    disabled={isBulkProcessing || Object.keys(selectedForPr).length === 0}
+                    style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '8px 16px', fontWeight: 900, cursor: Object.keys(selectedForPr).length === 0 ? 'not-allowed' : 'pointer', borderRadius: '4px', opacity: Object.keys(selectedForPr).length === 0 ? 0.5 : 1 }}
+                  >
+                    {isBulkProcessing ? 'RAISING PRs...' : 'RAISE PR FOR SELECTED'}
+                  </button>
+                </div>
+                
+                <div className="table-wrapper">
+                  <table className="sharp-table">
+                    <thead>
+                      <tr>
+                        <th>SL NO</th>
+                        <th>ITEM NAME (LOCATION)</th>
+                        <th>CURRENT STOCK</th>
+                        <th>REQUESTED STOCK</th>
+                        <th>GAP</th>
+                        <th>ORDER QTY</th>
+                        <th>VENDOR</th>
+                        <th style={{ textAlign: 'center' }}>SELECT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {demandSummary.items.length === 0 ? (
+                        <tr><td colSpan={7} className="text-center py-12 text-dim">No demands found.</td></tr>
+                      ) : (
+                        demandSummary.items
+                          .filter((item: any) => item.type === 'MATERIAL' && item.gap > 0)
+                          .filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation)
+                          .map((item: any, idx: number) => {
+                            const locName = locations.find(l => l._id === item.locationId)?.name || 'Unknown Location';
+                            const itemKey = `${item.materialId}-${item.locationId}`;
+                            const isRaised = raisedPrs[itemKey];
+
+                            return (
+                              <tr key={`item-${idx}`} className={isRaised ? 'row-disabled' : ''}>
+                                <td>{idx + 1}</td>
+                                <td>
+                                  <strong>{item.name.toUpperCase()}</strong>
+                                  <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{locName.toUpperCase()}</div>
+                                </td>
+                                <td>{item.stock.toFixed(2)} {item.unit?.toUpperCase()}</td>
+                                <td>{item.demand.toFixed(2)} {item.unit?.toUpperCase()}</td>
+                                <td style={{ color: '#ef4444', fontWeight: 900 }}>{item.gap.toFixed(2)} {item.unit?.toUpperCase()}</td>
+                                <td>
+                                  {isRaised ? (
+                                    <span style={{ fontWeight: 900 }}>{orderQuantities[itemKey]} {item.unit?.toUpperCase()}</span>
+                                  ) : (
+                                    <input 
+                                      type="number"
+                                      value={orderQuantities[itemKey] ?? item.moq}
+                                      onChange={(e) => setOrderQuantities({...orderQuantities, [itemKey]: Number(e.target.value)})}
+                                      style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                                    />
+                                  )}
+                                </td>
+                                <td>
+                                  {isRaised ? (
+                                    <span className="status-pill status-billed">PR RAISED</span>
+                                  ) : (
+                                    <select 
+                                      value={vendorForPr[itemKey] || ''}
+                                      onChange={(e) => setVendorForPr({...vendorForPr, [itemKey]: e.target.value})}
+                                      style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.75rem', width: '100%', outline: 'none' }}
+                                    >
+                                      <option value="">SELECT VENDOR...</option>
+                                      {vendors.map(v => (
+                                        <option key={v._id} value={v._id}>{v.vendorName.toUpperCase()}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  <input 
+                                    type="checkbox" 
+                                    checked={selectedForPr[itemKey] || false}
+                                    onChange={(e) => setSelectedForPr({...selectedForPr, [itemKey]: e.target.checked})}
+                                    disabled={isRaised}
+                                    style={{ transform: 'scale(1.2)', cursor: isRaised ? 'not-allowed' : 'pointer' }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           ) : (
@@ -508,7 +658,7 @@ const FoodRequestPage: React.FC = () => {
                                                 <span style={{ fontSize: '0.65rem', fontWeight: 800 }}>{item.unit?.toUpperCase()}</span>
                                               </div>
                                             ) : (
-                                              <strong>{item.receivedQty !== undefined ? item.receivedQty : item.requestedQty} {item.unit?.toUpperCase()}</strong>
+                                              <strong>{item.receivedQty !== null && item.receivedQty !== undefined ? item.receivedQty : item.requestedQty} {item.unit?.toUpperCase()}</strong>
                                             )}
                                           </td>
                                           {/* Other columns remain unchanged */}
@@ -568,6 +718,8 @@ const FoodRequestPage: React.FC = () => {
         </div>
       )}
 
+      {/* PR Modal Removed in favor of Bulk Inline PR */}
+
       <style>{`
         .page-header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; }
         .header-title h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
@@ -597,7 +749,7 @@ const FoodRequestPage: React.FC = () => {
         .tab-item.active { color: var(--primary); }
         .tab-item.active::after { content: ''; position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: var(--primary); }
 
-        .consolidated-panel { background: rgba(0,0,0,0.1); border: 1px solid var(--border-main); padding: 24px; }
+        .consolidated-panel { background: transparent; border: 1px solid var(--border-main); padding: 24px; }
         .consolidated-header { margin-bottom: 24px; }
         .section-title { font-size: 0.7rem; font-weight: 800; color: var(--primary); letter-spacing: 1px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(249,115,22,0.1); padding-bottom: 8px; }
         .info-badge { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px; }

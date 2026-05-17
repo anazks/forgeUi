@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { purchaseApi, rawMaterialApi, vendorApi } from '../services/api';
+import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { 
   ShoppingBag, Plus, Search, Filter, 
@@ -25,7 +25,9 @@ const PurchasePage: React.FC = () => {
   const [requests, setRequests] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
   
   // UI states
   const [isLoading, setIsLoading] = useState(true);
@@ -33,14 +35,20 @@ const PurchasePage: React.FC = () => {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showBillModal, setShowBillModal] = useState(false);
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedPR, setSelectedPR] = useState<any>(null);
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [receiveForm, setReceiveForm] = useState<Record<string, number>>({});
+  const [filterLocation, setFilterLocation] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Form states for New Request
   const [requestForm, setRequestForm] = useState({
     items: [] as any[],
-    notes: ''
+    notes: '',
+    vendorId: '',
+    destinationLocation: ''
   });
 
   // Form states for Approval
@@ -59,16 +67,20 @@ const PurchasePage: React.FC = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [rRes, bRes, iRes, vRes] = await Promise.all([
+      const [rRes, bRes, iRes, vRes, locRes, mRes] = await Promise.all([
         purchaseApi.getRequests(),
         purchaseApi.getBills(),
         rawMaterialApi.getAll(entityId),
-        vendorApi.getAll(entityId)
+        vendorApi.getAll(entityId),
+        userApi.getLocations(entityId),
+        menuApi.getAll(entityId)
       ]);
       setRequests(rRes.data.data || []);
       setBills(bRes.data.data || []);
       setItems(iRes.data.data || []);
       setVendors(vRes.data.data || []);
+      setLocations(locRes.data.data || []);
+      setMenuItems(mRes.data.data || []);
     } catch (err) {
       console.error('Failed to fetch purchase data');
     } finally {
@@ -179,14 +191,47 @@ const PurchasePage: React.FC = () => {
     }
   };
 
-  const handleUpdateBillDirect = async (id: string, data: any) => {
-    if (!window.confirm('Mark these items as received? This will update inventory stock.')) return;
+  const handleUpdateBillDirect = async (billId: string, updates: any) => {
     try {
       setIsProcessing(true);
-      await purchaseApi.updateBill(id, data);
+      await purchaseApi.updateBill(billId, updates);
       fetchData();
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to update bill');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const openReceiveModal = (bill: any) => {
+    setSelectedBill(bill);
+    const qtys: Record<string, number> = {};
+    bill.items.forEach((item: any) => {
+      qtys[item.item] = item.quantity; // Default to requested quantity
+    });
+    setReceiveForm(qtys);
+    setShowReceiveModal(true);
+  };
+
+  const handleConfirmReceive = async () => {
+    if (!selectedBill) return;
+    try {
+      setIsProcessing(true);
+      
+      const updatedItems = selectedBill.items.map((i: any) => ({
+        ...i,
+        receivedQty: receiveForm[i.item] !== undefined ? receiveForm[i.item] : i.quantity
+      }));
+
+      await purchaseApi.updateBill(selectedBill._id, {
+        deliveryStatus: 'DELIVERED',
+        items: updatedItems
+      });
+
+      setShowReceiveModal(false);
+      fetchData();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to receive delivery');
     } finally {
       setIsProcessing(false);
     }
@@ -205,6 +250,13 @@ const PurchasePage: React.FC = () => {
     }
   };
 
+  const combinedItems = [
+    ...items.map(i => ({ _id: i._id, name: i.name, unit: i.unit, type: 'RAW MATERIAL' })),
+    ...menuItems.map(m => ({ _id: m._id, name: m.name, unit: m.unit, type: 'DIRECT ITEM' }))
+  ];
+
+  const filteredItems = combinedItems.filter(i => i.name?.toLowerCase().includes(searchQuery.toLowerCase()));
+
   return (
     <MainLayout>
       <header className="page-header">
@@ -221,130 +273,100 @@ const PurchasePage: React.FC = () => {
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="workflow-tabs">
-        <button 
-          className={`tab-item ${activeTab === 'REQUESTS' ? 'active' : ''}`}
-          onClick={() => setActiveTab('REQUESTS')}
-        >
-          <FileText size={16} /> PURCHASE REQUESTS
-        </button>
-        <button 
-          className={`tab-item ${activeTab === 'BILLS' ? 'active' : ''}`}
-          onClick={() => setActiveTab('BILLS')}
-        >
-          <CreditCard size={16} /> BILLS &amp; PAYMENTS
-        </button>
-      </div>
-
       <div className="data-panel">
         {isLoading ? <ForgeLoader /> : (
           <div className="table-wrapper">
-            {activeTab === 'REQUESTS' ? (
-              <table className="sharp-table">
-                <thead>
-                  <tr>
-                    <th>PR-CODE</th>
-                    <th>REQUESTED BY</th>
-                    <th>ITEMS</th>
-                    <th>DATE</th>
-                    <th>VENDOR</th>
-                    <th>STATUS</th>
-                    <th>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requests.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-12 text-dim">No purchase requests found.</td></tr>
-                  ) : requests.map(r => (
-                    <tr key={r._id}>
-                      <td><span className="code-badge">{r.prCode}</span></td>
-                      <td>{r.requestedBy?.name || 'Store'}</td>
-                      <td>
-                        <div className="item-summary-pill">
-                          {r.items.length} Items
-                        </div>
-                      </td>
-                      <td>{new Date(r.createdAt).toLocaleDateString()}</td>
-                      <td>{r.vendor?.vendorName || <span className="dim">Not Assigned</span>}</td>
-                      <td><span className={`status-pill ${getStatusColor(r.status)}`}>{r.status}</span></td>
-                      <td>
-                        {isAdmin && r.status === 'PENDING' && (
-                          <button className="btn-action-sm approve" onClick={() => openApprovalModal(r)}>
-                            REVIEW &amp; BILL
-                          </button>
-                        )}
-                        {r.status === 'BILLED' && (
-                          <span className="info-text text-billed"><CheckCircle size={12} /> Billed Generated</span>
-                        )}
-                        {r.status === 'PENDING' && !isAdmin && (
-                          <span className="info-text"><AlertCircle size={12} /> Awaiting Approval</span>
-                        )}
-                      </td>
-                    </tr>
+            {isStore && (
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
+                <select 
+                  value={filterLocation}
+                  onChange={(e) => setFilterLocation(e.target.value)}
+                  style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px 12px', color: 'var(--text-main)', outline: 'none' }}
+                >
+                  <option value="ALL">ALL LOCATIONS</option>
+                  {locations.map(loc => (
+                    <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
                   ))}
-                </tbody>
-              </table>
-            ) : (
-              <table className="sharp-table">
-                <thead>
-                  <tr>
-                    <th>BILL-CODE</th>
-                    <th>VENDOR</th>
-                    <th>AMOUNT</th>
-                    <th>PAID</th>
-                    <th>PAYMENT</th>
-                    <th>DELIVERY</th>
-                    <th>ACTIONS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bills.length === 0 ? (
-                    <tr><td colSpan={7} className="text-center py-12 text-dim">No bills generated yet.</td></tr>
-                  ) : bills.map(b => (
-                    <tr key={b._id}>
-                      <td><span className="code-badge bill">{b.billCode}</span></td>
-                      <td><strong>{b.vendor?.vendorName}</strong></td>
-                      <td>₹{b.totalAmount.toLocaleString()}</td>
-                      <td className={b.paidAmount >= b.totalAmount ? 'text-success' : 'text-danger'}>
-                        ₹{b.paidAmount.toLocaleString()}
-                      </td>
-                      <td><span className={`status-pill ${getStatusColor(b.paymentStatus)}`}>{b.paymentStatus}</span></td>
-                      <td><span className={`status-pill ${getStatusColor(b.deliveryStatus)}`}>{b.deliveryStatus}</span></td>
-                      <td>
-                        {isAdmin ? (
-                          <button className="btn-action-sm payment" onClick={() => openBillModal(b)}>
-                            MANAGE BILL
-                          </button>
-                        ) : (
-                          b.deliveryStatus === 'PENDING' ? (
+                </select>
+              </div>
+            )}
+            <table className="sharp-table">
+              <thead>
+                <tr>
+                  <th>PR-CODE</th>
+                  <th>VENDOR</th>
+                  {isStore && <th>DELIVERY LOCATION</th>}
+                  <th>DATE</th>
+                  <th>STATUS</th>
+                  <th style={{ textAlign: 'center' }}>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(filterLocation === 'ALL' ? bills : bills.filter(b => b.destinationLocation === filterLocation)).length === 0 ? (
+                  <tr><td colSpan={isStore ? 6 : 5} className="text-center py-12 text-dim">No purchases found.</td></tr>
+                ) : (
+                  (filterLocation === 'ALL' ? bills : bills.filter(b => b.destinationLocation === filterLocation)).map((bill, idx) => {
+                    
+                    let displayStatus = 'PR RAISED';
+                    let statusClass = 'status-billed';
+                    if (bill.deliveryStatus === 'DELIVERED') {
+                      if (!isStore && !isAdmin) {
+                        displayStatus = 'DELIVERY RECEIVED';
+                        statusClass = 'status-delivered';
+                      } else {
+                        if (bill.paymentStatus === 'PAID') {
+                          displayStatus = 'PAYMENT DONE';
+                          statusClass = 'status-paid';
+                        } else {
+                          displayStatus = 'PAYMENT DUE';
+                          statusClass = 'status-pending';
+                        }
+                      }
+                    }
+
+                    const deliveryLoc = locations.find(l => l._id === bill.destinationLocation);
+
+                    return (
+                      <tr key={idx}>
+                        <td>{bill.purchaseRequest?.prCode || bill.billCode}</td>
+                        <td>{bill.vendor?.vendorName || 'UNKNOWN'}</td>
+                        {isStore && <td>{deliveryLoc ? deliveryLoc.name : 'Unknown'}</td>}
+                        <td>{new Date(bill.createdAt).toLocaleDateString()}</td>
+                        <td>
+                          <span className={`status-pill ${statusClass}`}>
+                            {displayStatus}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {bill.deliveryStatus === 'PENDING' && (!isStore || (user?.location && user.location === bill.destinationLocation)) && (
                             <button 
                               className="btn-action-sm received" 
+                              style={{ margin: '0 auto' }}
+                              onClick={() => openReceiveModal(bill)}
+                            >
+                              <Check size={14} /> ACCEPT DELIVERY
+                            </button>
+                          )}
+                          {(isStore || isAdmin) && bill.deliveryStatus === 'DELIVERED' && bill.paymentStatus !== 'PAID' && (
+                            <button 
+                              className="btn-action-sm edit" 
+                              style={{ margin: '0 auto' }}
                               onClick={() => {
-                                setSelectedBill(b);
-                                setPaymentForm({
-                                  paidAmount: b.paidAmount,
-                                  paymentStatus: b.paymentStatus,
-                                  deliveryStatus: 'DELIVERED'
-                                });
-                                // Automatically trigger update for Store
-                                handleUpdateBillDirect(b._id, { deliveryStatus: 'DELIVERED' });
+                                // Direct update to paid for simplicity in Store Manager view
+                                handleUpdateBillDirect(bill._id, { paymentStatus: 'PAID' });
                               }}
                             >
-                              <Truck size={14} /> MARK RECEIVED
+                              <DollarSign size={14} /> MARK PAID
                             </button>
-                          ) : (
-                            <span className="info-text text-delivered">
-                              <CheckCircle size={12} /> Items Received
-                            </span>
-                          )
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
@@ -361,19 +383,64 @@ const PurchasePage: React.FC = () => {
             </div>
             
             <div className="modal-body pr-modal-body">
-              <div className="item-selector-section">
-                <label>ADD ITEMS FROM CONFIG</label>
-                <div className="item-search-grid">
-                  {items.map(i => (
-                    <button 
-                      key={i._id} 
-                      className={`selector-pill ${requestForm.items.find(ri => ri.item === i._id) ? 'selected' : ''}`}
-                      onClick={() => handleAddItemToRequest(i)}
-                    >
-                      {i.name.toUpperCase()}
-                    </button>
-                  ))}
+              <div style={{ display: 'flex', gap: '16px', marginBottom: '20px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '8px', display: 'block' }}>VENDOR</label>
+                  <select 
+                    value={requestForm.vendorId} 
+                    onChange={(e) => setRequestForm({...requestForm, vendorId: e.target.value})}
+                    style={{ width: '100%', padding: '8px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                  >
+                    <option value="">SELECT VENDOR...</option>
+                    {vendors.map(v => (
+                      <option key={v._id} value={v._id}>{v.vendorName.toUpperCase()}</option>
+                    ))}
+                  </select>
                 </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '8px', display: 'block' }}>DELIVERY LOCATION</label>
+                  <select 
+                    value={requestForm.destinationLocation} 
+                    onChange={(e) => setRequestForm({...requestForm, destinationLocation: e.target.value})}
+                    style={{ width: '100%', padding: '8px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                  >
+                    <option value="">SELECT LOCATION...</option>
+                    {locations.map(loc => (
+                      <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()} ({loc.roleType})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="item-selector-section" style={{ position: 'relative' }}>
+                <label>ADD ITEMS TO REQUEST</label>
+                <input 
+                  type="text" 
+                  placeholder="Search materials or direct items..." 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{ width: '100%', padding: '8px', marginBottom: '12px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                />
+                {searchQuery.trim().length > 0 && (
+                  <div className="item-search-grid" style={{ position: 'absolute', top: '100%', left: 0, right: 0, maxHeight: '200px', overflowY: 'auto', background: 'var(--bg-main)', border: '1px solid var(--primary)', zIndex: 10, padding: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.5)' }}>
+                    {filteredItems.map(i => (
+                      <button 
+                        key={i._id} 
+                        className={`selector-pill ${requestForm.items.find(ri => ri.item === i._id) ? 'selected' : ''}`}
+                        onClick={() => {
+                          handleAddItemToRequest(i);
+                          setSearchQuery('');
+                        }}
+                        title={i.type}
+                        style={{ display: 'flex', justifyContent: 'space-between', width: '100%', padding: '8px 12px', marginBottom: '4px', textAlign: 'left', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)' }}
+                      >
+                        <span>{i.name.toUpperCase()}</span>
+                        <span style={{fontSize: '0.6rem', opacity: 0.7, color: 'var(--primary)'}}>{i.type}</span>
+                      </button>
+                    ))}
+                    {filteredItems.length === 0 && <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', textAlign: 'center', padding: '10px' }}>No items found.</div>}
+                  </div>
+                )}
               </div>
 
               <div className="selected-items-table">
@@ -518,6 +585,58 @@ const PurchasePage: React.FC = () => {
               <button className="btn-cancel" onClick={() => setShowApprovalModal(false)}>CANCEL</button>
               <button className="btn-save" onClick={handleApprovePR} disabled={isProcessing || !approvalForm.vendor}>
                 {isProcessing ? 'GENERATING BILL...' : 'APPROVE & GENERATE BILL'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Receipt Modal */}
+      {showReceiveModal && selectedBill && (
+        <div className="modal-overlay">
+          <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h2>ACCEPT DELIVERY</h2>
+              <button className="btn-close" onClick={() => setShowReceiveModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="bill-detail-card" style={{ marginBottom: '16px' }}>
+                <div className="bill-row">
+                  <label>VENDOR</label>
+                  <span>{selectedBill.vendor?.vendorName || 'UNKNOWN'}</span>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>VERIFY RECEIVED QUANTITIES (UPDATES INVENTORY)</p>
+              <table className="mini-table">
+                <thead>
+                  <tr>
+                    <th>ITEM NAME</th>
+                    <th>ORDERED QTY</th>
+                    <th>RECEIVED QTY</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedBill.items.map((i: any, idx: number) => (
+                    <tr key={idx}>
+                      <td><strong>{i.itemName}</strong></td>
+                      <td>{i.quantity}</td>
+                      <td>
+                        <input 
+                          type="number"
+                          value={receiveForm[i.item] ?? i.quantity}
+                          onChange={(e) => setReceiveForm({...receiveForm, [i.item]: Number(e.target.value)})}
+                          style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-footer">
+              <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CANCEL</button>
+              <button className="btn-action-sm received" onClick={handleConfirmReceive} disabled={isProcessing}>
+                {isProcessing ? 'PROCESSING...' : 'CONFIRM RECEIPT'}
               </button>
             </div>
           </div>

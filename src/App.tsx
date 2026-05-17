@@ -15,6 +15,7 @@ import PaymentSettings from './components/PaymentSettings';
 import WastagePage from './components/WastagePage';
 import CentersDashboardPage from './components/CentersDashboardPage';
 import FinancePage from './components/FinancePage';
+import InventoryPage from './components/InventoryPage';
 import './App.css';
 
 function App() {
@@ -53,6 +54,8 @@ function App() {
         <Route path="/entity/:entityId/wastage" element={<WastagePage />} />
         <Route path="/master-database" element={<MasterDatabasePage />} />
         <Route path="/entity/:entityId/master-database" element={<MasterDatabasePage />} />
+        <Route path="/inventory" element={<InventoryPage />} />
+        <Route path="/entity/:entityId/inventory" element={<InventoryPage />} />
         <Route path="/purchase" element={<PurchasePage />} />
         <Route path="/entity/:entityId/purchase" element={<PurchasePage />} />
         <Route path="/payment-settings" element={<PaymentSettings />} />

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MainLayout from '../layouts/MainLayout';
-import { bomApi, rawMaterialApi, menuApi } from '../services/api';
+import { bomApi, rawMaterialApi, menuApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { Plus, Search, Loader2, X, Edit2, Trash2, Trash, ChevronDown } from 'lucide-react';
 import { useParams } from 'react-router-dom';
@@ -107,6 +107,7 @@ const BomPage: React.FC = () => {
   const [boms, setBoms] = useState<any[]>([]);
   const [rawMaterials, setRawMaterials] = useState<Material[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [locations, setLocations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -114,6 +115,7 @@ const BomPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [dishName, setDishName] = useState('');
+  const [preparationLocation, setPreparationLocation] = useState('');
   const [dishUnit, setDishUnit] = useState('pcs');
   const [dishCustomUnit, setDishCustomUnit] = useState('');
   const [kitchenPrice, setKitchenPrice] = useState('');
@@ -130,7 +132,15 @@ const BomPage: React.FC = () => {
     fetchBoms();
     fetchMaterials();
     fetchMenuItems();
+    fetchLocations();
   }, []);
+
+  const fetchLocations = async () => {
+    try {
+      const res = await userApi.getLocations(entityId);
+      setLocations(res.data.data || []);
+    } catch { }
+  };
 
   const fetchMenuItems = async () => {
     try {
@@ -203,6 +213,7 @@ const BomPage: React.FC = () => {
   const openCreateModal = async () => {
     setEditingId(null);
     setDishName('');
+    setPreparationLocation('SELF');
     setDishUnit('pcs');
     setDishCustomUnit('');
     setKitchenPrice('');
@@ -216,6 +227,7 @@ const BomPage: React.FC = () => {
   const handleEdit = async (bom: any) => {
     setEditingId(bom._id);
     setDishName(bom.dishName || '');
+    setPreparationLocation(bom.preparationLocation || 'SELF');
     setDishUnit(bom.unit || 'pcs');
     setDishCustomUnit(bom.customUnit || '');
     setKitchenPrice(bom.kitchenPrice?.toString() || '0');
@@ -249,6 +261,10 @@ const BomPage: React.FC = () => {
       setError('Please enter a dish name');
       return;
     }
+    if (!preparationLocation) {
+      setError('Please select a preparation location');
+      return;
+    }
     const unset = items.findIndex(i => !i.itemName.trim());
     if (unset !== -1) {
       setError(`Please select a material for ingredient row ${unset + 1}`);
@@ -259,6 +275,7 @@ const BomPage: React.FC = () => {
       setError('');
       const payload = {
         dishName: dishName.trim(),
+        preparationLocation: preparationLocation === 'SELF' ? null : preparationLocation,
         unit: dishUnit,
         ...(dishUnit === 'custom' && { customUnit: dishCustomUnit }),
         kitchenPrice: Number(kitchenPrice) || 0,
@@ -363,16 +380,24 @@ const BomPage: React.FC = () => {
             {error && <div className="error-message">{error}</div>}
 
             <form onSubmit={handleSubmit} className="standard-form">
-              <div className="bom-top-fields">
+              <div className="form-row">
                 <div className="form-group">
-                  <label>Dish Name</label>
+                  <label>DISH NAME</label>
                   <input
                     type="text"
+                    placeholder="e.g. Butter Chicken, Paneer Tikka"
                     value={dishName}
                     onChange={(e) => setDishName(e.target.value)}
-                    required
-                    placeholder="e.g. Butter Chicken, Paneer Tikka"
                   />
+                </div>
+                <div className="form-group">
+                  <label>PREPARATION LOCATION (mandatory)</label>
+                  <select value={preparationLocation} onChange={e => setPreparationLocation(e.target.value)}>
+                    <option value="SELF">Self (Prepared at Requesting Location)</option>
+                    {locations.map(loc => (
+                      <option key={loc._id} value={loc._id}>{loc.name} ({loc.role})</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="form-group">
                   <label>Unit <span className="auto-label">(mandatory)</span></label>

@@ -73,7 +73,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isStore = user?.role === 'STORE';
   const isPartner = user?.role === 'PARTNER';
   const isResort = user?.role === 'RESORT';
-  const isCenters = user?.role === 'CENTERS';
+  const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN';
 
   return (
     <div className="dashboard-layout">
@@ -120,14 +120,17 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <Package size={18} /><span>Stock Dashboard</span>
                 </button>
                 <button className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`} onClick={() => navigate('/store-requests')}>
-                  <UtensilsCrossed size={18} /><span>Food Requests</span>
+                  <UtensilsCrossed size={18} /><span>Stock Requests</span>
                   <span className="nav-notification-dot"></span>
+                </button>
+                <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
+                  <Package size={18} /><span>Inventory</span>
                 </button>
                 <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
                   <ShoppingBag size={18} /><span>New Purchase</span>
                 </button>
                 <button className={`nav-item ${location.pathname === '/master-database' ? 'active' : ''}`} onClick={() => navigate('/master-database')}>
-                  <Database size={18} /><span>Master Database</span>
+                  <Database size={18} /><span>Vendor Database</span>
                 </button>
               </nav>
             </div>
@@ -195,6 +198,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
                     <UtensilsCrossed size={18} /><span>My Requests</span>
                   </button>
+                  <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
+                    <Package size={18} /><span>Inventory</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
+                    <ShoppingBag size={18} /><span>Purchases</span>
+                  </button>
                   <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
                     <TrendingDown size={18} /><span>Wastage Management</span>
                   </button>
@@ -218,6 +227,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   </button>
                   <button className={`nav-item ${isActive('/master-database', 'master-database') ? 'active' : ''}`} onClick={() => navTo('/master-database', 'master-database')}>
                     <Database size={18} /><span>Master Database</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
+                    <Package size={18} /><span>Inventory</span>
                   </button>
                   <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
                     <ShoppingBag size={18} /><span>Purchase</span>

@@ -26,7 +26,8 @@ export const authApi = {
 
 export const userApi = {
   getMe: () => api.get('/users/me'),
-  getAll: (entityId?: string) => api.get(`/users${entityId ? `?entity=${entityId}` : ''}`),
+  getAll: (entityId?: string) => api.get(entityId ? `/users?entity=${entityId}` : '/users'),
+  getLocations: (entityId?: string) => api.get(entityId ? `/users/my-locations?entity=${entityId}` : '/users/my-locations'),
   getMyCenters: (entityId?: string) => api.get(`/users/my-centers${entityId ? `?entity=${entityId}` : ''}`),
   getMyKitchens: (entityId?: string) => api.get(`/users/my-kitchens${entityId ? `?entity=${entityId}` : ''}`),
   getMyStores: (entityId?: string) => api.get(`/users/my-stores${entityId ? `?entity=${entityId}` : ''}`),
@@ -162,6 +163,11 @@ export const financeApi = {
   getStats: (entityId?: string) => api.get(`/finance/stats${entityId ? `?entityId=${entityId}` : ''}`),
   getAll: (entityId?: string) => api.get(`/finance${entityId ? `?entityId=${entityId}` : ''}`),
   create: (data: any) => api.post('/finance', data),
+};
+
+export const inventoryApi = {
+  getAll: (locationId?: string) => api.get(`/inventory${locationId ? `?locationId=${locationId}` : ''}`),
+  update: (id: string, data: any) => api.put(`/inventory/${id}`, data),
 };
 
 export default api;

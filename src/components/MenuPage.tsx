@@ -178,7 +178,6 @@ const MenuPage: React.FC = () => {
       await foodRequestApi.create(payload);
       setSuccess(`Successfully requested ${qty} units of ${item.name || item.dishName || 'item'} for ${new Date(deliveryDate).toLocaleDateString()}`);
       setOrderQtys(prev => ({ ...prev, [item._id]: 0 }));
-      fetchDemand(); // Refresh kitchen demand summary
       setTimeout(() => setSuccess(''), 5000);
     } catch (err: any) {
       console.log(err);
