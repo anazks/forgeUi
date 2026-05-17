@@ -46,7 +46,7 @@ export const entityApi = {
 
 export const paymentApi = {
   getStats: () => api.get('/payments/stats'),
-  manualRenewal: (data: { adminId: string; amount: number; duration: number; paymentType?: string }) => 
+  manualRenewal: (data: { adminId: string; amount: number; duration: number; paymentType?: string }) =>
     api.post('/payments/manual-renewal', data),
 };
 
@@ -56,7 +56,7 @@ export const menuApi = {
   update: (id: string, data: any) => api.put(`/menus/${id}`, data),
   delete: (id: string) => api.delete(`/menus/${id}`),
   getRates: (entityId?: string) => api.get(`/menus/rates${entityId ? `?entity=${entityId}` : ''}`),
-  updateRate: (data: { menuId?: string; bomId?: string; centerId: string; rate: number; entityId?: string }) => 
+  updateRate: (data: { menuId?: string; bomId?: string; centerId: string; rate: number; entityId?: string }) =>
     api.post('/menus/rates', data),
 };
 
@@ -83,10 +83,16 @@ export const foodRequestApi = {
     return api.get(url);
   },
   create: (data: any) => api.post('/foodrequests', data),
-  getDemandSummary: (entityId?: string) => api.get(`/foodrequests/demand-summary${entityId ? `?entity=${entityId}` : ''}`),
+  getDemandSummary: (entityId?: string, date?: string) => {
+    let url = `/foodrequests/demand-summary?`;
+    if (entityId) url += `entity=${entityId}&`;
+    if (date) url += `date=${date}&`;
+    return api.get(url);
+  },
   seedSample: (data?: any) => api.post('/foodrequests/seed-sample', data || {}),
   approve: (id: string) => api.put(`/foodrequests/${id}/approve`, {}),
   reject: (id: string, reason: string) => api.put(`/foodrequests/${id}/reject`, { reason }),
+  receive: (id: string, items: any[]) => api.put(`/foodrequests/${id}/receive`, { items }),
 };
 export const vendorApi = {
   getAll: (entityId?: string) => api.get(`/vendors${entityId ? `?entity=${entityId}` : ''}`),
@@ -129,6 +135,13 @@ export const purchaseApi = {
   getAll: () => api.get('/purchases'),
   create: (data: any) => api.post('/purchases', data),
   delete: (id: string) => api.delete(`/purchases/${id}`),
+  // Purchase Requests
+  getRequests: () => api.get('/purchases/requests'),
+  createRequest: (data: any) => api.post('/purchases/requests', data),
+  approveRequest: (id: string, data: any) => api.put(`/purchases/requests/${id}/approve`, data),
+  // Bills
+  getBills: () => api.get('/purchases/bills'),
+  updateBill: (id: string, data: any) => api.put(`/purchases/bills/${id}`, data),
 };
 
 export const wastageApi = {

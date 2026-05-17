@@ -5,20 +5,22 @@ import { foodRequestApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
   Plus, RefreshCw, CheckCircle, XCircle, Clock,
-  AlertTriangle, ChevronDown, ChevronUp, Loader2, Beaker
+  AlertTriangle, ChevronDown, ChevronUp, Loader2, Beaker,
+  Package, PackageCheck, Edit3
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
-  PENDING:  'status-pending',
+  PENDING: 'status-pending',
   APPROVED: 'status-approved',
   REJECTED: 'status-rejected',
-  PARTIAL:  'status-partial',
+  PARTIAL: 'status-partial',
+  RECEIVED: 'status-received',
 };
 
 const FoodRequestPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
-  
-  // Mock data for immediate visibility as requested
+
+  // Mock data for immediate visibility
   const mockRequests = [
     {
       _id: 'mock-1',
@@ -52,22 +54,34 @@ const FoodRequestPage: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [demandSummary, setDemandSummary] = useState<any[]>([]);
-  const [showDemand, setShowDemand] = useState(false);
+  const [demandSummary, setDemandSummary] = useState<{ menus: any[], materials: any[] }>({ menus: [], materials: [] });
+  const [summaryDate, setSummaryDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  });
+  const [receivingId, setReceivingId] = useState<string | null>(null);
+  const [receivedQtys, setReceivedQtys] = useState<Record<string, number>>({});
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const isCenter = user?.role === 'CENTERS';
+  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
 
-  useEffect(() => { 
-    fetchRequests(); 
-    if (!isCenter) fetchDemand();
+  const [activeTab, setActiveTab] = useState<'CONSOLIDATED' | 'INDIVIDUAL'>(isStore ? 'CONSOLIDATED' : 'INDIVIDUAL');
+
+  useEffect(() => {
+    fetchRequests();
   }, [entityId]);
+
+  useEffect(() => {
+    if (!isCenter) fetchDemand();
+  }, [entityId, summaryDate]);
 
   const fetchDemand = async () => {
     try {
-      const res = await foodRequestApi.getDemandSummary(entityId);
-      setDemandSummary(res.data.data || []);
+      const res = await foodRequestApi.getDemandSummary(entityId, summaryDate);
+      setDemandSummary(res.data.data || { menus: [], materials: [] });
     } catch (err) {
       console.error('Failed to fetch demand summary:', err);
     }
@@ -83,11 +97,7 @@ const FoodRequestPage: React.FC = () => {
       setIsLoading(true);
       const res = await foodRequestApi.getAll(entityId);
       const data = res.data.data || [];
-      if (data.length === 0) {
-        setRequests(mockRequests);
-      } else {
-        setRequests(data);
-      }
+      setRequests(data.length === 0 ? mockRequests : data);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load requests');
     } finally {
@@ -113,11 +123,7 @@ const FoodRequestPage: React.FC = () => {
       setProcessingId(id);
       const res = await foodRequestApi.approve(id);
       const { stockStatus, message } = res.data;
-      if (stockStatus === 'ALL_AVAILABLE') {
-        showToast(message, 'success');
-      } else {
-        showToast(message, 'warn');
-      }
+      showToast(message, stockStatus === 'ALL_AVAILABLE' ? 'success' : 'warn');
       fetchRequests();
       fetchDemand();
     } catch (err: any) {
@@ -143,15 +149,37 @@ const FoodRequestPage: React.FC = () => {
     }
   };
 
-  const pending  = requests.filter(r => r.status === 'PENDING');
+  const handleReceive = async (id: string) => {
+    try {
+      setProcessingId(id);
+      const req = requests.find(r => r._id === id);
+      const items = req.requestedItems.map((item: any, idx: number) => ({
+        ...item,
+        receivedQty: Number(receivedQtys[`${id}-${idx}`] ?? item.requestedQty)
+      }));
+
+      await foodRequestApi.receive(id, items);
+      showToast('Inventory updated and pricing adjusted!', 'success');
+      setReceivingId(null);
+      setExpandedId(null);
+      fetchRequests();
+    } catch (err: any) {
+      showToast(err.response?.data?.error || 'Failed to update receipt', 'error');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const pending = requests.filter(r => r.status === 'PENDING');
   const approved = requests.filter(r => r.status === 'APPROVED');
-  const partial  = requests.filter(r => r.status === 'PARTIAL');
+  const partial = requests.filter(r => r.status === 'PARTIAL');
   const rejected = requests.filter(r => r.status === 'REJECTED');
 
   const renderStatusIcon = (status: string) => {
     if (status === 'APPROVED') return <CheckCircle size={13} />;
     if (status === 'REJECTED') return <XCircle size={13} />;
-    if (status === 'PARTIAL')  return <AlertTriangle size={13} />;
+    if (status === 'PARTIAL') return <AlertTriangle size={13} />;
+    if (status === 'RECEIVED') return <PackageCheck size={13} />;
     return <Clock size={13} />;
   };
 
@@ -180,102 +208,21 @@ const FoodRequestPage: React.FC = () => {
 
       {error && <div className="error-message">{error}</div>}
 
-      {/* Demand Summary / Center Dashboard Section */}
-      {!isCenter ? (
-        <div className="demand-container">
-          <button className="demand-toggle" onClick={() => setShowDemand(!showDemand)}>
-            <Beaker size={14} /> 
-            KITCHEN PRODUCTION DEMAND (MENU ITEMS ONLY)
-            {showDemand ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      {/* Tabs for Store/Admin */}
+      {isStore && !isCenter && (
+        <div className="workflow-tabs">
+          <button
+            className={`tab-item ${activeTab === 'CONSOLIDATED' ? 'active' : ''}`}
+            onClick={() => setActiveTab('CONSOLIDATED')}
+          >
+            <Package size={16} /> CONSOLIDATED DEMAND
           </button>
-          
-          {showDemand && (
-            <div className="demand-grid">
-              {demandSummary.length === 0 ? (
-                <div className="demand-empty">No pending material demand.</div>
-              ) : (
-                demandSummary.map((item, idx) => {
-                  const stock = item.currentStock || 0;
-                  const isSufficient = stock >= item.totalQty;
-                  const percent = item.totalQty > 0 ? Math.min((stock / item.totalQty) * 100, 100) : 100;
-                  return (
-                  <div key={idx} className={`demand-card ${isSufficient ? 'demand-suff' : 'demand-insuff'}`}>
-                    <div className="demand-card-header">
-                      <span className="demand-name">{item.name.toUpperCase()}</span>
-                      <div className="demand-qty-group">
-                        <span className="demand-qty" title="Required">{item.totalQty.toFixed(2)}</span>
-                        <span className="demand-vs">/</span>
-                        <span className={`demand-stock ${isSufficient ? 'txt-suff' : 'txt-insuff'}`} title="In Stock">{stock.toFixed(2)} {item.unit?.toUpperCase()}</span>
-                      </div>
-                    </div>
-                    <div className="demand-progress-bg">
-                      <div className={`demand-progress-fill ${isSufficient ? 'bg-suff' : 'bg-insuff'}`} style={{width: `${percent}%`}} />
-                    </div>
-                  </div>
-                )})
-              )}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="demand-container">
-          <div className="demand-toggle" style={{ cursor: 'default' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <CheckCircle size={14} /> 
-              DAILY REVENUE DASHBOARD (APPROVED ITEMS)
-            </div>
-          </div>
-          <div className="demand-grid">
-            {(() => {
-              const dailyStats: { [date: string]: { cost: number; sales: number } } = {};
-              requests.forEach(req => {
-                if (req.status === 'APPROVED' || req.status === 'PARTIAL') {
-                  const d = new Date(req.deliveryDate).toLocaleDateString();
-                  if (!dailyStats[d]) dailyStats[d] = { cost: 0, sales: 0 };
-                  req.requestedItems.forEach((item: any) => {
-                    if (item.isStockSufficient !== false) {
-                      const rate = item.assignedRate || 0;
-                      const selling = item.sellingRate || rate;
-                      dailyStats[d].cost += (rate * item.requestedQty);
-                      dailyStats[d].sales += (selling * item.requestedQty);
-                    }
-                  });
-                }
-              });
-
-              const dates = Object.keys(dailyStats).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
-              
-              if (dates.length === 0) {
-                return <div className="demand-empty">No approved requests yet.</div>;
-              }
-
-              return dates.map((date, idx) => {
-                const { cost, sales } = dailyStats[date];
-                const margin = sales - cost;
-                return (
-                  <div key={idx} className="demand-card revenue-card">
-                    <div className="demand-card-header">
-                      <span className="demand-name">{date}</span>
-                    </div>
-                    <div className="revenue-stats">
-                      <div className="rev-stat">
-                        <label>BUYING</label>
-                        <span className="val cost">₹{cost.toFixed(2)}</span>
-                      </div>
-                      <div className="rev-stat">
-                        <label>SELLING</label>
-                        <span className="val sales">₹{sales.toFixed(2)}</span>
-                      </div>
-                      <div className="rev-stat margin">
-                        <label>MARGIN</label>
-                        <span className="val profit">₹{margin.toFixed(2)}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
+          <button
+            className={`tab-item ${activeTab === 'INDIVIDUAL' ? 'active' : ''}`}
+            onClick={() => setActiveTab('INDIVIDUAL')}
+          >
+            <Clock size={16} /> CENTER REQUESTS ({pending.length})
+          </button>
         </div>
       )}
 
@@ -288,188 +235,336 @@ const FoodRequestPage: React.FC = () => {
         <div className="fr-stat partial"><AlertTriangle size={14} /><span>{partial.length}</span><label>PARTIAL</label></div>
         <div className="fr-divider" />
         <div className="fr-stat rejected"><XCircle size={14} /><span>{rejected.length}</span><label>REJECTED</label></div>
+        <div className="fr-divider" />
+        <div className="fr-stat received"><PackageCheck size={14} /><span>{requests.filter(r => r.status === 'RECEIVED').length}</span><label>RECEIVED</label></div>
       </div>
 
       {isLoading ? <ForgeLoader /> : (
-        <div className="fr-list">
-          {requests.length === 0 && (
-            <div className="empty-state">
-              No food requests yet.
-              <button className="btn-seed inline-seed" onClick={handleSeedSample} disabled={seeding}>
-                {seeding ? 'Creating...' : '+ Create Sample Requests'}
-              </button>
-            </div>
-          )}
-
-          {/* Grouped by Center */}
-          {Object.entries(
-            requests.reduce((acc: any, req) => {
-              const name = req.centerName || 'Unknown Center';
-              if (!acc[name]) acc[name] = [];
-              acc[name].push(req);
-              return acc;
-            }, {})
-          ).map(([centerName, centerRequests]: [string, any]) => (
-            <div key={centerName} className="center-group">
-              <div className="center-group-header">
-                <div className="center-dot" />
-                <h2>{centerName.toUpperCase()}</h2>
-                <span className="center-req-count">{centerRequests.length} REQUESTS</span>
-              </div>
-              
-              <div className="center-group-content">
-                {centerRequests.map((req: any) => {
-            const isExpanded = expandedId === req._id;
-            const isProcessing = processingId === req._id;
-            const isRejecting = rejectingId === req._id;
-            const isPending = req.status === 'PENDING';
-
-            return (
-              <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>
-                {/* Card Header */}
-                <div className="fr-card-header" onClick={() => setExpandedId(isExpanded ? null : req._id)}>
-                  <div className="fr-card-left">
-                    <div className={`fr-status-tag ${STATUS_COLORS[req.status]}`}>
-                      {renderStatusIcon(req.status)}
-                      {req.status}
+        <div className="fr-content">
+          {activeTab === 'CONSOLIDATED' && !isCenter ? (
+            /* ==================== CONSOLIDATED VIEW ==================== */
+            <div className="consolidated-panel">
+              <div className="consolidated-header">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+                  <div>
+                    <div className="info-badge">
+                      <Package size={14} />
+                      <span>TOTAL DEMAND ACROSS ALL PENDING REQUESTS FOR SELECTED DATE</span>
                     </div>
-                    <div className="fr-center-info">
-                      <span className="fr-meta">
-                        <strong className="item-count-badge">{req.requestedItems.length} ITEMS TOTAL</strong> · REQ: {new Date(req.createdAt).toLocaleDateString()} · <strong style={{color: 'var(--primary)'}}>DELIVERY: {req.deliveryDate ? new Date(req.deliveryDate).toLocaleDateString() : 'TBD'}</strong>
-                      </span>
-                    </div>
+                    <p className="info-desc">Consolidated view of all menu items and raw materials needed for selected date.</p>
                   </div>
-                  <div className="fr-card-right">
-                    {isPending && (
-                      <div className="fr-action-row" onClick={e => e.stopPropagation()}>
-                        <button
-                          className="btn-approve"
-                          onClick={() => handleApprove(req._id)}
-                          disabled={isProcessing}
-                        >
-                          {isProcessing ? <Loader2 size={13} className="spin" /> : <CheckCircle size={13} />}
-                          APPROVE
-                        </button>
-                        <button
-                          className="btn-reject"
-                          onClick={() => setRejectingId(isRejecting ? null : req._id)}
-                          disabled={isProcessing}
-                        >
-                          <XCircle size={13} /> REJECT
-                        </button>
-                      </div>
-                    )}
-                    {req.status === 'APPROVED' && (
-                      <span className="approved-by">
-                        ✓ Approved {req.approvedAt ? new Date(req.approvedAt).toLocaleDateString() : ''}
-                      </span>
-                    )}
-                    {req.status === 'REJECTED' && (
-                      <span className="rejected-by">✕ {req.rejectionReason || 'Rejected'}</span>
-                    )}
-                    {req.status === 'PARTIAL' && (
-                      <span className="partial-note">⚠ Insufficient stock on some items</span>
-                    )}
-                    <button className="expand-btn">
-                      {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    </button>
+                  <div className="header-date-picker">
+                    <label>DELIVERY DATE:</label>
+                    <input
+                      type="date"
+                      value={summaryDate}
+                      onChange={(e) => setSummaryDate(e.target.value)}
+                    />
                   </div>
                 </div>
-
-                {/* Reject reason input */}
-                {isRejecting && (
-                  <div className="reject-form" onClick={e => e.stopPropagation()}>
-                    <input
-                      type="text"
-                      placeholder="Rejection reason (optional)"
-                      value={rejectReason}
-                      onChange={e => setRejectReason(e.target.value)}
-                      className="reject-input"
-                    />
-                    <button className="btn-reject-confirm" onClick={() => handleReject(req._id)} disabled={isProcessing}>
-                      {isProcessing ? <Loader2 size={13} className="spin" /> : 'CONFIRM REJECT'}
-                    </button>
-                    <button className="btn-cancel-reject" onClick={() => setRejectingId(null)}>CANCEL</button>
-                  </div>
-                )}
-
-                {/* Expanded Items */}
-                {isExpanded && (
-                  <div className="fr-items-panel">
-                    {req.notes && <p className="fr-notes">📝 {req.notes}</p>}
-                    <table className="fr-items-table">
-                      <thead>
-                        <tr>
-                          <th>CODE</th>
-                          <th>ITEM</th>
-                          <th>REQUESTED</th>
-                          {!isCenter && req.status !== 'PENDING' && <th>IN STOCK AT APPROVAL</th>}
-                          {!isCenter && req.status !== 'PENDING' && <th>SUFFICIENT?</th>}
-                          {isCenter && req.status !== 'PENDING' && <th>RATE</th>}
-                          {isCenter && req.status !== 'PENDING' && <th>TOTAL COST</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {req.requestedItems.map((item: any, i: number) => {
-                          const hasBom = item.isMenuItem && item.bomId && item.bomId.items && item.bomId.items.length > 0;
-                          return (
-                            <React.Fragment key={i}>
-                              <tr className={hasBom ? "has-bom-row" : ""}>
-                                <td><span className="code-sm">{item.simpleCode || '—'}</span></td>
-                                <td>
-                                  <strong>{item.materialName.toUpperCase()}</strong>
-                                  {hasBom && <span className="bom-badge">MENU ITEM</span>}
-                                </td>
-                                <td><strong>{item.requestedQty} {item.unit?.toUpperCase()}</strong></td>
-                                {!isCenter && req.status !== 'PENDING' && (
-                                  <td className={item.isStockSufficient === false ? 'td-warn' : ''}>
-                                    {item.availableStock !== null ? `${item.availableStock} ${item.unit?.toUpperCase()}` : '—'}
-                                  </td>
-                                )}
-                                {!isCenter && req.status !== 'PENDING' && (
-                                  <td>
-                                    {item.isStockSufficient === true  && <span className="suff-yes">✓ YES</span>}
-                                    {item.isStockSufficient === false && <span className="suff-no">✗ NO</span>}
-                                    {item.isStockSufficient === null  && <span className="suff-na">—</span>}
-                                  </td>
-                                )}
-                                {isCenter && req.status !== 'PENDING' && (
-                                  <td>
-                                    {item.isStockSufficient === false ? <span className="suff-no">REJECTED</span> : (item.assignedRate !== undefined ? `₹${item.assignedRate}` : '—')}
-                                  </td>
-                                )}
-                                {isCenter && req.status !== 'PENDING' && (
-                                  <td>
-                                    <strong style={{ color: item.isStockSufficient === false ? 'var(--text-dim)' : 'var(--primary)' }}>
-                                      {item.isStockSufficient === false ? '—' : (item.assignedRate !== undefined ? `₹${(item.assignedRate * item.requestedQty).toFixed(2)}` : '—')}
-                                    </strong>
-                                  </td>
-                                )}
-                              </tr>
-                              {!isCenter && hasBom && item.bomId.items.map((ing: any, idx: number) => {
-                                const totalIngQty = Number(ing.quantity) * Number(item.requestedQty);
-                                return (
-                                  <tr key={`bom-${i}-${idx}`} className="bom-ingredient-row">
-                                    <td></td>
-                                    <td className="bom-ing-name"><span className="ing-arrow">↳</span> {(ing.itemName || ing.materialName || 'Unknown Material').toUpperCase()}</td>
-                                    <td className="bom-ing-qty">{totalIngQty.toFixed(2)} {ing.unit === 'custom' ? (ing.customUnit || 'unit').toUpperCase() : (ing.unit || 'UNIT').toUpperCase()}</td>
-                                    {req.status !== 'PENDING' && <td colSpan={2}></td>}
-                                  </tr>
-                                );
-                              })}
-                            </React.Fragment>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
               </div>
-            );
-                })}
+
+              {/* Menu Items */}
+              <div className="consolidated-section">
+                <h3 className="section-title"><Clock size={14} /> MENU ITEM PRODUCTION DEMAND</h3>
+                <div className="demand-grid consolidated">
+                  {demandSummary.menus.length === 0 ? (
+                    <div className="demand-empty">No menu items requested.</div>
+                  ) : (
+                    demandSummary.menus.map((item: any, idx: number) => (
+                      <div key={`menu-${idx}`} className="demand-card consolidated menu-type">
+                        <div className="demand-card-header">
+                          <span className="demand-name">{item.name.toUpperCase()}</span>
+                          <div className="demand-qty-group">
+                            <span className="demand-qty">{item.totalQty.toFixed(2)}</span>
+                            <span className="demand-vs">{item.unit?.toUpperCase()}</span>
+                          </div>
+                        </div>
+                        <div className="demand-footer">
+                          <span className="status-label production">TO BE PRODUCED</span>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Raw Materials */}
+              <div className="consolidated-section" style={{ marginTop: '32px' }}>
+                <h3 className="section-title"><Beaker size={14} /> RAW MATERIAL / INGREDIENT DEMAND</h3>
+                <div className="demand-grid consolidated">
+                  {demandSummary.materials.length === 0 ? (
+                    <div className="demand-empty">No material demand found.</div>
+                  ) : (
+                    demandSummary.materials.map((item: any, idx: number) => {
+                      const stock = item.currentStock || 0;
+                      const isSufficient = stock >= item.totalQty;
+                      const percent = item.totalQty > 0 ? Math.min((stock / item.totalQty) * 100, 100) : 100;
+                      return (
+                        <div key={`mat-${idx}`} className={`demand-card consolidated ${isSufficient ? 'demand-suff' : 'demand-insuff'}`}>
+                          <div className="demand-card-header">
+                            <span className="demand-name">{item.name.toUpperCase()}</span>
+                            <div className="demand-qty-group">
+                              <span className="demand-qty">{item.totalQty.toFixed(2)}</span>
+                              <span className="demand-vs">/</span>
+                              <span className={`demand-stock ${isSufficient ? 'txt-suff' : 'txt-insuff'}`}>{stock.toFixed(2)} {item.unit?.toUpperCase()}</span>
+                            </div>
+                          </div>
+                          <div className="demand-progress-bg">
+                            <div className={`demand-progress-fill ${isSufficient ? 'bg-suff' : 'bg-insuff'}`} style={{ width: `${percent}%` }} />
+                          </div>
+                          <div className="demand-footer">
+                            {isSufficient ? (
+                              <span className="status-label ok"><CheckCircle size={10} /> IN STOCK</span>
+                            ) : (
+                              <span className="status-label short"><AlertTriangle size={10} /> SHORT: {(item.totalQty - stock).toFixed(2)}</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {pending.length > 0 && (
+                  <div className="consolidated-actions">
+                    <div className="action-hint">
+                      <AlertTriangle size={14} />
+                      <span>Review shortages above before approving individual requests in the next tab.</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+          ) : (
+            /* ==================== INDIVIDUAL REQUESTS VIEW ==================== */
+            <div className="fr-list">
+              {requests.length === 0 && (
+                <div className="empty-state">
+                  No food requests yet.
+                  <button className="btn-seed inline-seed" onClick={handleSeedSample} disabled={seeding}>
+                    {seeding ? 'Creating...' : '+ Create Sample Requests'}
+                  </button>
+                </div>
+              )}
+
+              {/* Grouped by Center */}
+              {Object.entries(
+                requests.reduce((acc: any, req) => {
+                  const name = req.centerName || 'Unknown Center';
+                  if (!acc[name]) acc[name] = [];
+                  acc[name].push(req);
+                  return acc;
+                }, {})
+              ).map(([centerName, centerRequests]: [string, any]) => (
+                <div key={centerName} className="center-group">
+                  <div className="center-group-header">
+                    <div className="center-dot" />
+                    <h2>{centerName.toUpperCase()}</h2>
+                    <span className="center-req-count">{centerRequests.length} REQUESTS</span>
+                  </div>
+
+                  <div className="center-group-content">
+                    {centerRequests.map((req: any) => {
+                      const isExpanded = expandedId === req._id;
+                      const isProcessing = processingId === req._id;
+                      const isRejecting = rejectingId === req._id;
+
+                      return (
+                        <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>
+                          {/* Card Header */}
+                          <div className="fr-card-header" onClick={() => setExpandedId(isExpanded ? null : req._id)}>
+                            <div className="fr-card-left">
+                              <div className={`fr-status-tag ${STATUS_COLORS[req.status]}`}>
+                                {renderStatusIcon(req.status)}
+                                {req.status}
+                              </div>
+                              <div className="fr-center-info">
+                                <span className="fr-meta">
+                                  <strong className="item-count-badge">{req.requestedItems.length} ITEMS TOTAL</strong> ·
+                                  REQ: {new Date(req.createdAt).toLocaleDateString()} ·
+                                  <strong style={{ color: 'var(--primary)' }}>
+                                    DELIVERY: {req.deliveryDate ? new Date(req.deliveryDate).toLocaleDateString() : 'TBD'}
+                                  </strong>
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="fr-card-right">
+                              {/* Store Actions */}
+                              {(req.status === 'PENDING' || req.status === 'PARTIAL') && !isCenter && (
+                                <div className="fr-action-row" onClick={e => e.stopPropagation()}>
+                                  <button className="btn-approve" onClick={() => handleApprove(req._id)} disabled={isProcessing}>
+                                    {isProcessing ? <Loader2 size={13} className="spin" /> : (req.status === 'PARTIAL' ? <RefreshCw size={13} /> : <CheckCircle size={13} />)}
+                                    {req.status === 'PARTIAL' ? 'RE-CHECK STOCK' : 'APPROVE'}
+                                  </button>
+                                  {req.status === 'PENDING' && (
+                                    <button className="btn-reject" onClick={() => setRejectingId(isRejecting ? null : req._id)} disabled={isProcessing}>
+                                      <XCircle size={13} /> REJECT
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Center Receive Action */}
+                              {(req.status === 'APPROVED' || req.status === 'PARTIAL') && isCenter && (
+                                <div className="fr-action-row" onClick={e => e.stopPropagation()}>
+                                  <button className="btn-receive" onClick={() => {
+                                    setReceivingId(req._id);
+                                    setExpandedId(req._id);
+                                    const qtys: Record<string, number> = {};
+                                    req.requestedItems.forEach((item: any, idx: number) => {
+                                      qtys[`${req._id}-${idx}`] = item.requestedQty;
+                                    });
+                                    setReceivedQtys(prev => ({ ...prev, ...qtys }));
+                                  }} disabled={isProcessing}>
+                                    <Package size={13} /> MARK RECEIVED
+                                  </button>
+                                </div>
+                              )}
+
+                              {req.status === 'APPROVED' && <span className="approved-by">✓ Approved</span>}
+                              {req.status === 'REJECTED' && <span className="rejected-by">✕ {req.rejectionReason || 'Rejected'}</span>}
+                              {req.status === 'PARTIAL' && <span className="partial-note">⚠ Insufficient stock on some items</span>}
+                              {req.status === 'RECEIVED' && <span className="received-by">✓ Items Received &amp; Stock Updated</span>}
+
+                              <button className="expand-btn">
+                                {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Reject Form */}
+                          {isRejecting && (
+                            <div className="reject-form" onClick={e => e.stopPropagation()}>
+                              <input type="text" placeholder="Rejection reason (optional)" value={rejectReason} onChange={e => setRejectReason(e.target.value)} className="reject-input" />
+                              <button className="btn-reject-confirm" onClick={() => handleReject(req._id)} disabled={isProcessing}>
+                                {isProcessing ? <Loader2 size={13} className="spin" /> : 'CONFIRM REJECT'}
+                              </button>
+                              <button className="btn-cancel-reject" onClick={() => setRejectingId(null)}>CANCEL</button>
+                            </div>
+                          )}
+
+                          {/* Receive Form */}
+                          {receivingId === req._id && (
+                            <div className="receive-form" onClick={e => e.stopPropagation()}>
+                              <div className="receive-header">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b5cf6' }}>
+                                  <Package size={14} />
+                                  <span style={{ fontWeight: 800, fontSize: '0.75rem' }}>CONFIRM RECEIVED QUANTITIES</span>
+                                </div>
+                                <p style={{ fontSize: '0.65rem', color: 'var(--text-dim)', margin: '4px 0 0 22px' }}>
+                                  Adjust counts if they don't match requested values. Pricing will auto-adjust.
+                                </p>
+                              </div>
+                              <div className="receive-actions">
+                                <button className="btn-receive-confirm" onClick={() => handleReceive(req._id)} disabled={isProcessing}>
+                                  {isProcessing ? <Loader2 size={13} className="spin" /> : 'CONFIRM RECEIPT'}
+                                </button>
+                                <button className="btn-cancel-receive" onClick={() => setReceivingId(null)}>CANCEL</button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Expanded Items */}
+                          {isExpanded && (
+                            <div className="fr-items-panel">
+                              {req.notes && <p className="fr-notes">📝 {req.notes}</p>}
+                              <table className="fr-items-table">
+                                <thead>
+                                  <tr>
+                                    <th>CODE</th>
+                                    <th>ITEM</th>
+                                    <th>{receivingId === req._id ? 'RECEIVED QTY' : 'REQUESTED'}</th>
+                                    {!isCenter && req.status !== 'PENDING' && <th>IN STOCK AT APPROVAL</th>}
+                                    {!isCenter && req.status !== 'PENDING' && <th>SUFFICIENT?</th>}
+                                    {isCenter && req.status !== 'PENDING' && <th>RATE</th>}
+                                    {isCenter && req.status !== 'PENDING' && <th>TOTAL COST</th>}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {req.requestedItems.map((item: any, i: number) => {
+                                    const hasBom = item.isMenuItem && item.bomId && item.bomId.items && item.bomId.items.length > 0;
+                                    return (
+                                      <React.Fragment key={i}>
+                                        <tr className={hasBom ? "has-bom-row" : ""}>
+                                          <td><span className="code-sm">{item.simpleCode || '—'}</span></td>
+                                          <td>
+                                            <strong>{item.materialName.toUpperCase()}</strong>
+                                            {hasBom && <span className="bom-badge">MENU ITEM</span>}
+                                          </td>
+                                          <td>
+                                            {receivingId === req._id ? (
+                                              <div className="receive-input-group">
+                                                <input
+                                                  type="number"
+                                                  value={receivedQtys[`${req._id}-${i}`] ?? item.requestedQty}
+                                                  onChange={(e) => setReceivedQtys({
+                                                    ...receivedQtys,
+                                                    [`${req._id}-${i}`]: Number(e.target.value)
+                                                  })}
+                                                  className="qty-edit-input"
+                                                />
+                                                <span style={{ fontSize: '0.65rem', fontWeight: 800 }}>{item.unit?.toUpperCase()}</span>
+                                              </div>
+                                            ) : (
+                                              <strong>{item.receivedQty !== undefined ? item.receivedQty : item.requestedQty} {item.unit?.toUpperCase()}</strong>
+                                            )}
+                                          </td>
+                                          {/* Other columns remain unchanged */}
+                                          {!isCenter && req.status !== 'PENDING' && (
+                                            <td className={item.isStockSufficient === false ? 'td-warn' : ''}>
+                                              {item.availableStock !== null ? `${item.availableStock} ${item.unit?.toUpperCase()}` : '—'}
+                                            </td>
+                                          )}
+                                          {!isCenter && req.status !== 'PENDING' && (
+                                            <td>
+                                              {item.isStockSufficient === true && <span className="suff-yes">✓ YES</span>}
+                                              {item.isStockSufficient === false && <span className="suff-no">✗ NO</span>}
+                                              {item.isStockSufficient === null && <span className="suff-na">—</span>}
+                                            </td>
+                                          )}
+                                          {isCenter && req.status !== 'PENDING' && (
+                                            <>
+                                              <td>
+                                                {item.isStockSufficient === false ? 'REJECTED' : (item.assignedRate !== undefined ? `₹${item.assignedRate}` : '—')}
+                                              </td>
+                                              <td>
+                                                <strong style={{ color: item.isStockSufficient === false ? 'var(--text-dim)' : 'var(--primary)' }}>
+                                                  {item.isStockSufficient === false ? '—' : `₹${(item.assignedRate * (item.receivedQty ?? (receivedQtys[`${req._id}-${i}`] ?? item.requestedQty))).toFixed(2)}`}
+                                                </strong>
+                                              </td>
+                                            </>
+                                          )}
+                                        </tr>
+
+                                        {/* BOM Ingredients */}
+                                        {!isCenter && hasBom && item.bomId.items.map((ing: any, idx: number) => {
+                                          const totalIngQty = Number(ing.quantity) * Number(item.requestedQty);
+                                          return (
+                                            <tr key={`bom-${i}-${idx}`} className="bom-ingredient-row">
+                                              <td></td>
+                                              <td className="bom-ing-name"><span className="ing-arrow">↳</span> {(ing.itemName || ing.materialName || 'Unknown Material').toUpperCase()}</td>
+                                              <td className="bom-ing-qty">{totalIngQty.toFixed(2)} {(ing.unit === 'custom' ? (ing.customUnit || 'unit') : (ing.unit || 'UNIT')).toUpperCase()}</td>
+                                              {req.status !== 'PENDING' && <td colSpan={2}></td>}
+                                            </tr>
+                                          );
+                                        })}
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -478,6 +573,10 @@ const FoodRequestPage: React.FC = () => {
         .header-title h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
         .subtitle { font-size: 0.7rem; color: var(--text-dim); font-weight: 800; letter-spacing: 1px; margin-top: 4px; }
         .header-actions { display: flex; gap: 10px; align-items: center; }
+
+        .header-date-picker { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,0.1); border: 1px solid var(--border-main); padding: 8px 16px; border-radius: 4px; }
+        .header-date-picker label { font-size: 0.65rem; font-weight: 800; color: var(--text-dim); letter-spacing: 1px; }
+        .header-date-picker input { background: transparent; border: none; color: var(--primary); font-size: 0.85rem; font-weight: 800; outline: none; cursor: pointer; color-scheme: dark; }
 
         .btn-seed { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #a855f7; padding: 9px 16px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: 0.2s; }
         .btn-seed:hover:not(:disabled) { background: rgba(168,85,247,0.2); }
@@ -491,6 +590,30 @@ const FoodRequestPage: React.FC = () => {
         .fr-toast-warn    { background: rgba(234,179,8,0.1);  border-color: #eab308; color: #eab308; }
         .fr-toast-error   { background: rgba(239,68,68,0.1);  border-color: #ef4444; color: #ef4444; }
         @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        .workflow-tabs { display: flex; gap: 8px; margin-bottom: 24px; border-bottom: 1px solid var(--border-main); padding-bottom: 2px; }
+        .tab-item { background: none; border: none; padding: 12px 24px; font-size: 0.75rem; font-weight: 800; color: var(--text-dim); cursor: pointer; display: flex; align-items: center; gap: 10px; transition: 0.2s; position: relative; }
+        .tab-item:hover { color: var(--text-main); }
+        .tab-item.active { color: var(--primary); }
+        .tab-item.active::after { content: ''; position: absolute; bottom: -2px; left: 0; right: 0; height: 2px; background: var(--primary); }
+
+        .consolidated-panel { background: rgba(0,0,0,0.1); border: 1px solid var(--border-main); padding: 24px; }
+        .consolidated-header { margin-bottom: 24px; }
+        .section-title { font-size: 0.7rem; font-weight: 800; color: var(--primary); letter-spacing: 1px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(249,115,22,0.1); padding-bottom: 8px; }
+        .info-badge { display: flex; align-items: center; gap: 8px; color: var(--primary); font-size: 0.75rem; font-weight: 800; letter-spacing: 1px; margin-bottom: 6px; }
+        .info-desc { font-size: 0.7rem; color: var(--text-dim); }
+        
+        .demand-grid.consolidated { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+        .demand-card.consolidated { padding: 16px; background: var(--bg-main); }
+        .demand-card.consolidated.menu-type { border-color: rgba(59,130,246,0.3); }
+        .demand-footer { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.05); }
+        .status-label { font-size: 0.6rem; font-weight: 800; display: flex; align-items: center; gap: 4px; }
+        .status-label.ok { color: #10b981; }
+        .status-label.short { color: #ef4444; }
+        .status-label.production { color: #3b82f6; }
+
+        .consolidated-actions { margin-top: 24px; padding-top: 20px; border-top: 1px dashed var(--border-main); }
+        .action-hint { display: flex; align-items: center; gap: 10px; font-size: 0.7rem; color: var(--text-dim); font-weight: 700; background: rgba(249,115,22,0.05); padding: 10px 16px; border: 1px solid rgba(249,115,22,0.2); }
 
         .demand-container { margin-bottom: 24px; background: rgba(0,0,0,0.1); border: 1px solid var(--border-main); }
         .demand-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: none; border: none; color: var(--primary); font-size: 0.75rem; font-weight: 800; cursor: pointer; letter-spacing: 1px; }
@@ -532,6 +655,7 @@ const FoodRequestPage: React.FC = () => {
         .fr-stat.approved { color: #10b981; }
         .fr-stat.partial { color: #f97316; }
         .fr-stat.rejected { color: #ef4444; }
+        .fr-stat.received { color: #8b5cf6; }
         .fr-divider { width: 1px; height: 36px; background: var(--border-main); margin: 0 28px; }
 
         /* Groups */
@@ -548,6 +672,7 @@ const FoodRequestPage: React.FC = () => {
         .fr-card.approved { border-left: 3px solid #10b981; }
         .fr-card.rejected { border-left: 3px solid #ef4444; }
         .fr-card.partial  { border-left: 3px solid #f97316; }
+        .fr-card.received { border-left: 3px solid #8b5cf6; }
 
         .fr-card-header { display: flex; justify-content: space-between; align-items: center; padding: 18px 20px; cursor: pointer; gap: 16px; }
         .fr-card-left { display: flex; align-items: center; gap: 16px; flex: 1; }
@@ -558,6 +683,7 @@ const FoodRequestPage: React.FC = () => {
         .status-approved { color: #10b981; border-color: rgba(16,185,129,0.3); background: rgba(16,185,129,0.06); }
         .status-rejected { color: #ef4444; border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.06); }
         .status-partial  { color: #f97316; border-color: rgba(249,115,22,0.3); background: rgba(249,115,22,0.06); }
+        .status-received { color: #8b5cf6; border-color: rgba(139,92,246,0.3); background: rgba(139,92,246,0.06); }
 
         .fr-center-info strong { display: block; font-size: 0.95rem; color: var(--text-main); }
         .item-count-badge { background: var(--primary); color: white; padding: 2px 8px; font-size: 0.6rem; border-radius: 4px; margin-right: 8px; }
@@ -573,6 +699,21 @@ const FoodRequestPage: React.FC = () => {
         .approved-by { font-size: 0.7rem; color: #10b981; font-weight: 700; }
         .rejected-by { font-size: 0.7rem; color: #ef4444; font-weight: 700; max-width: 180px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
         .partial-note { font-size: 0.7rem; color: #f97316; font-weight: 700; }
+        .received-by { font-size: 0.7rem; color: #8b5cf6; font-weight: 700; }
+
+        .btn-receive { background: rgba(139,92,246,0.1); border: 1px solid rgba(139,92,246,0.3); color: #8b5cf6; padding: 7px 14px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.2s; }
+        .btn-receive:hover:not(:disabled) { background: rgba(139,92,246,0.2); }
+        .btn-receive:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .receive-form { padding: 16px 20px; border-top: 1px solid var(--border-main); background: rgba(139,92,246,0.03); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+        .receive-header { display: flex; flex-direction: column; }
+        .receive-actions { display: flex; gap: 10px; }
+        .btn-receive-confirm { background: #8b5cf6; color: white; border: none; padding: 8px 16px; font-weight: 800; font-size: 0.7rem; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+        .btn-cancel-receive { background: none; border: 1px solid var(--border-main); color: var(--text-dim); padding: 8px 12px; font-size: 0.7rem; font-weight: 700; cursor: pointer; }
+
+        .receive-input-group { display: flex; align-items: center; gap: 6px; }
+        .qty-edit-input { width: 70px; background: var(--bg-main); border: 1px solid rgba(139,92,246,0.4); color: var(--text-main); padding: 4px 8px; font-size: 0.8rem; font-weight: 800; outline: none; transition: border-color 0.2s; }
+        .qty-edit-input:focus { border-color: #8b5cf6; }
 
         .expand-btn { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 4px; }
 
