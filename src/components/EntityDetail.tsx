@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
+import {
   ArrowLeft, UserPlus, MapPin, Loader2, ShieldCheck,
   Trash2, Edit2, RefreshCw, ToggleLeft, ToggleRight, Pencil
 } from 'lucide-react';
 import { entityApi, userApi, paymentApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
-const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGRIGATE', 'PARTNER'];
+const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGREGATE', 'PARTNER'];
 
 const EntityDetail: React.FC = () => {
   const { entityId: id } = useParams<{ entityId: string }>();
@@ -23,7 +23,7 @@ const EntityDetail: React.FC = () => {
   const [renewalData, setRenewalData] = useState({ amount: 0, duration: 1 });
   const [editEntityData, setEditEntityData] = useState({ name: '', location: '', username: '' });
   const [customLicenseDate, setCustomLicenseDate] = useState('');
-  
+
   const [newUser, setNewUser] = useState<any>({
     name: '', email: '', password: '', mobileNo: '', area: '',
     role: 'ADMIN', duration: 1, commissionRate: 0
@@ -209,7 +209,7 @@ const EntityDetail: React.FC = () => {
                   <td className="text-right">
                     <div className="action-btns">
                       <button className="icon-btn renew" title="Renew License" onClick={() => { setSelectedUser(admin); setIsRenewing(true); }}><RefreshCw size={14} /></button>
-                      <button className="icon-btn edit" onClick={() => { setNewUser({...admin, password: ''}); setIsAddingUser(true); }}><Edit2 size={14} /></button>
+                      <button className="icon-btn edit" onClick={() => { setNewUser({ ...admin, password: '' }); setIsAddingUser(true); }}><Edit2 size={14} /></button>
                       <button className="icon-btn delete" onClick={() => handleDeleteUser(admin._id)}><Trash2 size={14} /></button>
                     </div>
                   </td>
@@ -228,27 +228,27 @@ const EntityDetail: React.FC = () => {
             <div className="modal-header"><h2>{newUser._id ? 'UPDATE' : 'ADD'} USER</h2></div>
             <form onSubmit={handleAddUser}>
               <div className="provision-grid">
-                <div className="input-group"><label>NAME</label><input className="input-field" value={newUser.name} onChange={e => setNewUser({...newUser, name: e.target.value})} required /></div>
-                <div className="input-group"><label>EMAIL</label><input className="input-field" type="email" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} required /></div>
+                <div className="input-group"><label>NAME</label><input className="input-field" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} required /></div>
+                <div className="input-group"><label>EMAIL</label><input className="input-field" type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required /></div>
                 <div className="input-group">
-                  <label>PASSWORD {newUser._id && <span style={{fontWeight:400,fontSize:'0.65rem'}}>(leave blank to keep current)</span>}</label>
-                  <input className="input-field" type="password" value={newUser.password} onChange={e => setNewUser({...newUser, password: e.target.value})} {...(!newUser._id ? {required: true} : {})} />
+                  <label>PASSWORD {newUser._id && <span style={{ fontWeight: 400, fontSize: '0.65rem' }}>(leave blank to keep current)</span>}</label>
+                  <input className="input-field" type="password" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} {...(!newUser._id ? { required: true } : {})} />
                 </div>
-                <div className="input-group"><label>CONTACT</label><input className="input-field" value={newUser.mobileNo} onChange={e => setNewUser({...newUser, mobileNo: e.target.value})} /></div>
-                <div className="input-group"><label>AREA</label><input className="input-field" value={newUser.area} onChange={e => setNewUser({...newUser, area: e.target.value})} /></div>
+                <div className="input-group"><label>CONTACT</label><input className="input-field" value={newUser.mobileNo} onChange={e => setNewUser({ ...newUser, mobileNo: e.target.value })} /></div>
+                <div className="input-group"><label>AREA</label><input className="input-field" value={newUser.area} onChange={e => setNewUser({ ...newUser, area: e.target.value })} /></div>
                 <div className="input-group">
                   <label>ROLE</label>
-                  <select className="input-field" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
+                  <select className="input-field" value={newUser.role} onChange={e => setNewUser({ ...newUser, role: e.target.value })}>
                     {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
-                {newUser.role === 'AGGRIGATE' && (
-                  <div className="input-group"><label>COMMISSION %</label><input type="number" className="input-field" value={newUser.commissionRate} onChange={e => setNewUser({...newUser, commissionRate: parseFloat(e.target.value)})} required /></div>
+                {newUser.role === 'AGGREGATE' && (
+                  <div className="input-group"><label>COMMISSION %</label><input type="number" className="input-field" value={newUser.commissionRate} onChange={e => setNewUser({ ...newUser, commissionRate: parseFloat(e.target.value) })} required /></div>
                 )}
                 {!newUser._id && (
                   <div className="input-group">
                     <label>LICENSE MONTHS</label>
-                    <select className="input-field" value={newUser.duration} onChange={e => setNewUser({...newUser, duration: parseInt(e.target.value)})}>
+                    <select className="input-field" value={newUser.duration} onChange={e => setNewUser({ ...newUser, duration: parseInt(e.target.value) })}>
                       <option value={1}>1 MONTH</option>
                       <option value={4}>4 MONTHS</option>
                       <option value={6}>6 MONTHS</option>
@@ -256,12 +256,12 @@ const EntityDetail: React.FC = () => {
                     </select>
                   </div>
                 )}
-                <div className="input-group" style={{gridColumn:'1/-1'}}>
+                <div className="input-group" style={{ gridColumn: '1/-1' }}>
                   <label>LICENSE EXPIRY DATE <span className="optional-label">(optional — overrides months)</span></label>
                   <input type="date" className="input-field" value={customLicenseDate} onChange={e => setCustomLicenseDate(e.target.value)} min={new Date().toISOString().split('T')[0]} />
                 </div>
               </div>
-              {error && <div className="error-message" style={{marginTop:8}}>{error}</div>}
+              {error && <div className="error-message" style={{ marginTop: 8 }}>{error}</div>}
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => { setIsAddingUser(false); setError(''); }}>CANCEL</button>
                 <button type="submit" className="btn-primary" disabled={isSubmitting}>{isSubmitting ? 'SAVING...' : 'SUBMIT'}</button>
@@ -278,11 +278,11 @@ const EntityDetail: React.FC = () => {
             <div className="modal-header"><h2>EDIT ENTITY</h2></div>
             <form onSubmit={handleEditEntity}>
               <div className="provision-grid">
-                <div className="input-group"><label>ENTITY NAME</label><input className="input-field" value={editEntityData.name} onChange={e => setEditEntityData({...editEntityData, name: e.target.value})} required /></div>
-                <div className="input-group"><label>LOCATION</label><input className="input-field" value={editEntityData.location} onChange={e => setEditEntityData({...editEntityData, location: e.target.value})} required /></div>
-                <div className="input-group"><label>IDENTIFIER (USERNAME)</label><input className="input-field" value={editEntityData.username} onChange={e => setEditEntityData({...editEntityData, username: e.target.value})} required /></div>
+                <div className="input-group"><label>ENTITY NAME</label><input className="input-field" value={editEntityData.name} onChange={e => setEditEntityData({ ...editEntityData, name: e.target.value })} required /></div>
+                <div className="input-group"><label>LOCATION</label><input className="input-field" value={editEntityData.location} onChange={e => setEditEntityData({ ...editEntityData, location: e.target.value })} required /></div>
+                <div className="input-group"><label>IDENTIFIER (USERNAME)</label><input className="input-field" value={editEntityData.username} onChange={e => setEditEntityData({ ...editEntityData, username: e.target.value })} required /></div>
               </div>
-              {error && <div className="error-message" style={{marginTop:8}}>{error}</div>}
+              {error && <div className="error-message" style={{ marginTop: 8 }}>{error}</div>}
               <div className="modal-actions">
                 <button type="button" className="btn-secondary" onClick={() => { setIsEditingEntity(false); setError(''); }}>CANCEL</button>
                 <button type="submit" className="btn-primary" disabled={isSubmitting}>{isSubmitting ? 'SAVING...' : 'UPDATE'}</button>
@@ -303,21 +303,21 @@ const EntityDetail: React.FC = () => {
                   <label>AMOUNT PAID (INR)</label>
                   <div className="input-wrapper">
                     <span className="inr-symbol">₹</span>
-                    <input type="number" className="input-field pl-10" value={renewalData.amount} onChange={e => setRenewalData({...renewalData, amount: parseFloat(e.target.value)})} required />
+                    <input type="number" className="input-field pl-10" value={renewalData.amount} onChange={e => setRenewalData({ ...renewalData, amount: parseFloat(e.target.value) })} required />
                   </div>
                 </div>
                 <div className="input-group">
                   <label>DURATION (MONTHS)</label>
-                  <select className="input-field" value={renewalData.duration} onChange={e => setRenewalData({...renewalData, duration: parseInt(e.target.value)})}>
+                  <select className="input-field" value={renewalData.duration} onChange={e => setRenewalData({ ...renewalData, duration: parseInt(e.target.value) })}>
                     <option value={1}>1 MONTH</option>
                     <option value={4}>4 MONTHS</option>
                     <option value={6}>6 MONTHS</option>
                     <option value={12}>12 MONTHS</option>
                   </select>
                 </div>
-                <div className="input-group" style={{gridColumn:'1/-1'}}>
+                <div className="input-group" style={{ gridColumn: '1/-1' }}>
                   <label>LICENSE EXPIRY DATE <span className="optional-label">(optional — overrides months)</span></label>
-                  <input type="date" className="input-field" value={(renewalData as any).customLicenseDate || ''} onChange={e => setRenewalData({...renewalData, customLicenseDate: e.target.value} as any)} min={new Date().toISOString().split('T')[0]} />
+                  <input type="date" className="input-field" value={(renewalData as any).customLicenseDate || ''} onChange={e => setRenewalData({ ...renewalData, customLicenseDate: e.target.value } as any)} min={new Date().toISOString().split('T')[0]} />
                 </div>
               </div>
               <div className="modal-actions">

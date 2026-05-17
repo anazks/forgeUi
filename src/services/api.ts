@@ -25,12 +25,13 @@ export const authApi = {
 };
 
 export const userApi = {
+  getMe: () => api.get('/users/me'),
   getAll: (entityId?: string) => api.get(`/users${entityId ? `?entity=${entityId}` : ''}`),
   getMyCenters: (entityId?: string) => api.get(`/users/my-centers${entityId ? `?entity=${entityId}` : ''}`),
   getMyKitchens: (entityId?: string) => api.get(`/users/my-kitchens${entityId ? `?entity=${entityId}` : ''}`),
   getMyStores: (entityId?: string) => api.get(`/users/my-stores${entityId ? `?entity=${entityId}` : ''}`),
   getMyResorts: (entityId?: string) => api.get(`/users/my-resorts${entityId ? `?entity=${entityId}` : ''}`),
-  getMyAggregates: (entityId?: string) => api.get(`/users/my-aggrigates${entityId ? `?entity=${entityId}` : ''}`),
+  getMyAggregates: (entityId?: string) => api.get(`/users/my-aggregates${entityId ? `?entity=${entityId}` : ''}`),
   toggleStatus: (userId: string) => api.put(`/users/${userId}/toggle-status`),
   delete: (userId: string) => api.delete(`/users/${userId}`),
   update: (userId: string, data: any) => api.put(`/users/${userId}`, data),
@@ -48,7 +49,7 @@ export const entityApi = {
 export const paymentApi = {
   getStats: () => api.get('/payments/stats'),
   getMonthlyRevenue: (year: number) => api.get(`/payments/monthly?year=${year}`),
-  manualRenewal: (data: { adminId: string; amount: number; duration: number; paymentType?: string }) => 
+  manualRenewal: (data: { adminId: string; amount: number; duration: number; paymentType?: string }) =>
     api.post('/payments/manual-renewal', data),
 };
 
@@ -57,6 +58,9 @@ export const menuApi = {
   create: (data: any) => api.post('/menus', data),
   update: (id: string, data: any) => api.put(`/menus/${id}`, data),
   delete: (id: string) => api.delete(`/menus/${id}`),
+  getRates: (entityId?: string) => api.get(`/menus/rates${entityId ? `?entity=${entityId}` : ''}`),
+  updateRate: (data: { menuId?: string; bomId?: string; centerId: string; rate: number; entityId?: string }) =>
+    api.post('/menus/rates', data),
 };
 
 export const bomApi = {
@@ -75,11 +79,23 @@ export const rawMaterialApi = {
 };
 
 export const foodRequestApi = {
-  getAll: (entityId?: string) => api.get(`/foodrequests${entityId ? `?entity=${entityId}` : ''}`),
+  getAll: (entityId?: string, centerId?: string) => {
+    let url = `/foodrequests?`;
+    if (entityId) url += `entity=${entityId}&`;
+    if (centerId) url += `centerId=${centerId}&`;
+    return api.get(url);
+  },
   create: (data: any) => api.post('/foodrequests', data),
+  getDemandSummary: (entityId?: string, date?: string) => {
+    let url = `/foodrequests/demand-summary?`;
+    if (entityId) url += `entity=${entityId}&`;
+    if (date) url += `date=${date}&`;
+    return api.get(url);
+  },
   seedSample: (data?: any) => api.post('/foodrequests/seed-sample', data || {}),
   approve: (id: string) => api.put(`/foodrequests/${id}/approve`, {}),
   reject: (id: string, reason: string) => api.put(`/foodrequests/${id}/reject`, { reason }),
+  receive: (id: string, items: any[]) => api.put(`/foodrequests/${id}/receive`, { items }),
 };
 export const vendorApi = {
   getAll: (entityId?: string) => api.get(`/vendors${entityId ? `?entity=${entityId}` : ''}`),
@@ -122,6 +138,30 @@ export const purchaseApi = {
   getAll: () => api.get('/purchases'),
   create: (data: any) => api.post('/purchases', data),
   delete: (id: string) => api.delete(`/purchases/${id}`),
+  // Purchase Requests
+  getRequests: () => api.get('/purchases/requests'),
+  createRequest: (data: any) => api.post('/purchases/requests', data),
+  approveRequest: (id: string, data: any) => api.put(`/purchases/requests/${id}/approve`, data),
+  // Bills
+  getBills: () => api.get('/purchases/bills'),
+  updateBill: (id: string, data: any) => api.put(`/purchases/bills/${id}`, data),
+};
+
+export const wastageApi = {
+  getToday: (date?: string) => api.get(`/wastage/today${date ? `?date=${date}` : ''}`),
+  getAll: (centerId?: string, date?: string) => {
+    let url = `/wastage?`;
+    if (centerId) url += `centerId=${centerId}&`;
+    if (date) url += `date=${date}&`;
+    return api.get(url);
+  },
+  save: (data: any) => api.post('/wastage', data),
+};
+
+export const financeApi = {
+  getStats: (entityId?: string) => api.get(`/finance/stats${entityId ? `?entityId=${entityId}` : ''}`),
+  getAll: (entityId?: string) => api.get(`/finance${entityId ? `?entityId=${entityId}` : ''}`),
+  create: (data: any) => api.post('/finance', data),
 };
 
 export default api;

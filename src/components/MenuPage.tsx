@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import MainLayout from '../layouts/MainLayout';
-import { menuApi, bomApi } from '../services/api';
+import { menuApi, bomApi, userApi, foodRequestApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
-import { Plus, Search, Loader2, X, Edit2, Trash2, BookOpen, ClipboardList } from 'lucide-react';
+import { Plus, Search, Loader2, X, Edit2, Trash2, BookOpen, ClipboardList, IndianRupee } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
 type TabType = 'all' | 'direct' | 'bom';
@@ -11,13 +11,26 @@ const MenuPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
   const [menus, setMenus] = useState<any[]>([]);
   const [boms, setBoms] = useState<any[]>([]);
+  const [centerRates, setCenterRates] = useState<any[]>([]);
+  const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('all');
+  const [editingRateItem, setEditingRateItem] = useState<any>(null);
+  const [newSellingRate, setNewSellingRate] = useState<string>('');
+
+  // Ordering state
+  const [orderQtys, setOrderQtys] = useState<Record<string, number>>({});
+  const [deliveryDate, setDeliveryDate] = useState(() => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
+  });
 
   // Form State
   const [formData, setFormData] = useState({
@@ -28,20 +41,39 @@ const MenuPage: React.FC = () => {
   });
 
   useEffect(() => {
-    fetchAll();
+    fetchInitialData();
   }, []);
 
-  const fetchAll = async () => {
+  const fetchInitialData = async () => {
     try {
       setIsLoading(true);
-      const [menuRes, bomRes] = await Promise.all([
+      setError('');
+
+      const [menuRes, bomRes, rateRes, userRes] = await Promise.allSettled([
         menuApi.getAll(entityId),
-        bomApi.getAll(entityId)
+        bomApi.getAll(entityId),
+        menuApi.getRates(entityId),
+        userApi.getMe()
       ]);
-      setMenus(menuRes.data.data || []);
-      setBoms(bomRes.data.data || []);
+
+      if (menuRes.status === 'fulfilled') {
+        console.log('Menus fetched:', menuRes.value.data.data);
+        setMenus(menuRes.value.data.data || []);
+      }
+      if (bomRes.status === 'fulfilled') {
+        console.log('BOMs fetched:', bomRes.value.data.data);
+        setBoms(bomRes.value.data.data || []);
+      }
+      if (rateRes.status === 'fulfilled') setCenterRates(rateRes.value.data.data || []);
+      if (userRes.status === 'fulfilled') setUser(userRes.value.data.data || null);
+
+      if (menuRes.status === 'rejected') {
+        console.error('Menu fetch failed:', menuRes.reason);
+        setError('Failed to load menu items');
+      }
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to load menu items');
+      console.error('Initial fetch error:', err);
+      setError(err.response?.data?.error || 'Failed to load menu data');
     } finally {
       setIsLoading(false);
     }
@@ -61,16 +93,42 @@ const MenuPage: React.FC = () => {
   };
 
   // Combine & filter
-  const directItems = menus.map(m => ({ ...m, _source: 'DIRECT' }));
-  const bomItems = boms.map(b => ({
-    _id: b._id,
-    _source: 'BOM',
-    name: b.dishName,
-    unitPrice: b.kitchenPrice || 0,
-    unit: '—',
-    ingredientCount: b.items?.length || 0,
-    createdAt: b.createdAt,
-  }));
+  const directItems = menus.map(m => {
+    // If user is a CENTER, find their specific rate
+    let finalPrice = m.unitPrice;
+    let sellingPrice = m.unitPrice;
+    if (user?.role === 'CENTERS') {
+      const customRate = centerRates.find(r => r.menu?._id === m._id && (r.center?._id === user._id || r.center === user._id));
+      if (customRate) {
+        finalPrice = customRate.rate;
+        sellingPrice = customRate.centerRate || customRate.rate;
+      }
+    }
+    return { ...m, _source: 'DIRECT', displayPrice: finalPrice, sellingPrice };
+  });
+
+  const bomItems = boms.map(b => {
+    let finalPrice = b.kitchenPrice || 0;
+    let sellingPrice = b.kitchenPrice || 0;
+    if (user?.role === 'CENTERS') {
+      const customRate = centerRates.find(r => r.bom?._id === b._id && (r.center?._id === user._id || r.center === user._id));
+      if (customRate) {
+        finalPrice = customRate.rate;
+        sellingPrice = customRate.centerRate || customRate.rate;
+      }
+    }
+    return {
+      _id: b._id,
+      _source: 'BOM',
+      name: b.dishName,
+      unitPrice: b.kitchenPrice || 0,
+      displayPrice: finalPrice,
+      sellingPrice,
+      unit: 'pcs',
+      ingredientCount: b.items?.length || 0,
+      createdAt: b.createdAt,
+    };
+  });
 
   const allItems = [...directItems, ...bomItems];
 
@@ -80,6 +138,53 @@ const MenuPage: React.FC = () => {
     if (activeTab === 'bom') return matchSearch && item._source === 'BOM';
     return matchSearch;
   });
+
+  const handleQtyChange = (itemId: string, qty: string) => {
+    setOrderQtys(prev => ({
+      ...prev,
+      [itemId]: parseInt(qty) || 0
+    }));
+  };
+
+  const handleRequest = async (item: any) => {
+    const qty = orderQtys[item._id];
+    if (!qty || qty <= 0) {
+      setError('Please enter a valid quantity');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      const payload = {
+        centerName: user.name || 'Unknown Center',
+        centerId: user._id || user.id,
+        entity: user.entity?._id || user.entity || null,
+        deliveryDate: deliveryDate || new Date().toISOString(),
+        requestedItems: [{
+          materialName: item.name || item.dishName || 'Unknown Item',
+          requestedQty: Number(qty),
+          unit: item.unit ? (item.unit === 'custom' ? item.customUnit : item.unit) : 'unit',
+          isMenuItem: true,
+          menuId: item._source === 'DIRECT' ? item._id : null,
+          bomId: item._source === 'BOM' ? item._id : null
+        }],
+        notes: `Center Request: ${qty} units of ${item.name || item.dishName || 'item'}`
+      };
+
+      console.log('Submitting Food Request Payload:', payload);
+      await foodRequestApi.create(payload);
+      setSuccess(`Successfully requested ${qty} units of ${item.name || item.dishName || 'item'} for ${new Date(deliveryDate).toLocaleDateString()}`);
+      setOrderQtys(prev => ({ ...prev, [item._id]: 0 }));
+      fetchDemand(); // Refresh kitchen demand summary
+      setTimeout(() => setSuccess(''), 5000);
+    } catch (err: any) {
+      console.log(err);
+      setError(err.response?.data?.error || 'Failed to submit request');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -122,6 +227,37 @@ const MenuPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
+  const handleUpdateSellingRate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingRateItem || !newSellingRate) return;
+    try {
+      setIsSubmitting(true);
+      setError('');
+      const payload: any = {
+        centerId: user._id || user.id,
+        centerRate: Number(newSellingRate)
+      };
+      if (editingRateItem._source === 'DIRECT') payload.menuId = editingRateItem._id;
+      else payload.bomId = editingRateItem._id;
+
+      await menuApi.updateRate(payload);
+      setSuccess('Selling rate updated successfully');
+      setEditingRateItem(null);
+      setNewSellingRate('');
+      fetchInitialData();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to update rate');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const openRateEdit = (item: any) => {
+    setEditingRateItem(item);
+    setNewSellingRate(item.sellingPrice.toString());
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -154,14 +290,30 @@ const MenuPage: React.FC = () => {
       <header className="page-header">
         <div className="header-title">
           <h1>MENU MANAGEMENT</h1>
-          <p className="subtitle">PRODUCT CATALOG — DIRECT &amp; BOM DISHES</p>
+          <p className="subtitle">
+            {user?.role === 'CENTERS' ? 'VIEW MENU & REQUEST ITEMS' : 'PRODUCT CATALOG — DIRECT & BOM DISHES'}
+          </p>
         </div>
-        <button className="btn-primary" onClick={openCreateModal}>
-          <Plus size={16} /> ADD MENU ITEM
-        </button>
+        {user?.role === 'CENTERS' && (
+          <div className="header-date-picker">
+            <label>DELIVERY DATE:</label>
+            <input
+              type="date"
+              value={deliveryDate}
+              onChange={(e) => setDeliveryDate(e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
+            />
+          </div>
+        )}
+        {user?.role !== 'CENTERS' && (
+          <button className="btn-primary" onClick={openCreateModal}>
+            <Plus size={16} /> ADD MENU ITEM
+          </button>
+        )}
       </header>
 
       {error && !isModalOpen && <div className="error-message">{error}</div>}
+      {success && <div className="success-banner">{success}</div>}
 
       {/* Summary Strip */}
       <div className="menu-summary">
@@ -217,11 +369,24 @@ const MenuPage: React.FC = () => {
               <thead>
                 <tr>
                   <th>SOURCE</th>
-                  <th>ITEM / DISH NAME</th>
-                  <th>PRICE (₹)</th>
+                  <th style={{ textAlign: 'left' }}>ITEM / DISH NAME</th>
+                  {user?.role === 'CENTERS' ? (
+                    <>
+                      <th>BUYING RATE (₹)</th>
+                      <th>SELLING RATE (₹)</th>
+                    </>
+                  ) : (
+                    <th>BASE PRICE (₹)</th>
+                  )}
                   <th>UNIT / INGREDIENTS</th>
-                  <th>DATE ADDED</th>
-                  <th>ACTIONS</th>
+                  {user?.role === 'CENTERS' ? (
+                    <th style={{ width: '250px' }}>REQUEST QUANTITY</th>
+                  ) : (
+                    <>
+                      <th>DATE ADDED</th>
+                      <th>ACTIONS</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -233,10 +398,24 @@ const MenuPage: React.FC = () => {
                         {item._source}
                       </span>
                     </td>
-                    <td>
+                    <td style={{ textAlign: 'left' }}>
                       <strong className="item-name">{item.name?.toUpperCase()}</strong>
                     </td>
-                    <td className="price-cell">₹ {(item.unitPrice || 0).toFixed(2)}</td>
+                    {user?.role === 'CENTERS' ? (
+                      <>
+                        <td className="price-cell buying">₹ {(item.displayPrice || 0).toFixed(2)}</td>
+                        <td className="price-cell selling">
+                          <div className="selling-price-wrap">
+                            ₹ {(item.sellingPrice || 0).toFixed(2)}
+                            <button className="icon-btn-mini" onClick={() => openRateEdit(item)} title="Edit Selling Price">
+                              <Edit2 size={10} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <td className="price-cell">₹ {(item.displayPrice || 0).toFixed(2)}</td>
+                    )}
                     <td>
                       {item._source === 'DIRECT' ? (
                         <span className="unit-tag">
@@ -246,23 +425,48 @@ const MenuPage: React.FC = () => {
                         <span className="ing-count">{item.ingredientCount} INGREDIENTS</span>
                       )}
                     </td>
-                    <td className="date-cell">{new Date(item.createdAt).toLocaleDateString()}</td>
-                    <td>
-                      <div className="action-buttons">
-                        {item._source === 'DIRECT' && (
-                          <button className="icon-btn edit" onClick={() => handleEdit(item)} title="Edit">
-                            <Edit2 size={14} />
+                    {user?.role === 'CENTERS' ? (
+                      <td>
+                        <div className="order-cell">
+                          <input
+                            type="number"
+                            className="qty-input"
+                            placeholder="Qty"
+                            value={orderQtys[item._id] || ''}
+                            onChange={(e) => handleQtyChange(item._id, e.target.value)}
+                            min="0"
+                          />
+                          <button
+                            className="btn-order"
+                            onClick={() => handleRequest(item)}
+                            disabled={isSubmitting || !orderQtys[item._id]}
+                          >
+                            {isSubmitting ? <Loader2 size={12} className="spin" /> : <Plus size={12} />}
+                            REQUEST
                           </button>
-                        )}
-                        <button
-                          className="icon-btn delete"
-                          onClick={() => item._source === 'DIRECT' ? handleDeleteDirect(item._id) : handleDeleteBom(item._id)}
-                          title="Delete"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </td>
+                        </div>
+                      </td>
+                    ) : (
+                      <>
+                        <td className="date-cell">{new Date(item.createdAt).toLocaleDateString()}</td>
+                        <td>
+                          <div className="action-buttons">
+                            {item._source === 'DIRECT' && (
+                              <button className="icon-btn edit" onClick={() => handleEdit(item)} title="Edit">
+                                <Edit2 size={14} />
+                              </button>
+                            )}
+                            <button
+                              className="icon-btn delete"
+                              onClick={() => item._source === 'DIRECT' ? handleDeleteDirect(item._id) : handleDeleteBom(item._id)}
+                              title="Delete"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -275,6 +479,56 @@ const MenuPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Selling Rate Edit Modal */}
+      {editingRateItem && (
+        <div className="modal-overlay">
+          <div className="modal-content rate-modal">
+            <button className="close-btn" onClick={() => setEditingRateItem(null)}><X size={20} /></button>
+            <div className="modal-tag selling-tag"><IndianRupee size={12} /> CONFIGURE SELLING PRICE</div>
+            <h2>Update Selling Rate</h2>
+            <p className="item-hint">{editingRateItem.name?.toUpperCase()}</p>
+            
+            <div className="rate-comparison">
+              <div className="rc-box">
+                <span className="rc-label">BUYING FROM ADMIN</span>
+                <span className="rc-val">₹ {editingRateItem.displayPrice.toFixed(2)}</span>
+              </div>
+              <div className="rc-arrow">→</div>
+              <div className="rc-box highlight">
+                <span className="rc-label">YOUR SELLING PRICE</span>
+                <span className="rc-val">₹ {Number(newSellingRate || 0).toFixed(2)}</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleUpdateSellingRate} className="standard-form">
+              <div className="form-group">
+                <label>New Selling Rate (₹)</label>
+                <div className="input-with-icon">
+                  <IndianRupee size={16} />
+                  <input
+                    type="number"
+                    value={newSellingRate}
+                    onChange={(e) => setNewSellingRate(e.target.value)}
+                    required
+                    step="0.01"
+                    min="0"
+                    placeholder="0.00"
+                    autoFocus
+                  />
+                </div>
+                <p className="margin-hint">
+                  Expected Margin: ₹ {(Number(newSellingRate) - editingRateItem.displayPrice).toFixed(2)}
+                </p>
+              </div>
+
+              <button type="submit" className="btn-submit" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'UPDATE SELLING PRICE'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add Direct Menu Item Modal */}
       {isModalOpen && (
@@ -415,6 +669,45 @@ const MenuPage: React.FC = () => {
         .empty-state { padding: 60px; text-align: center; color: var(--text-dim); font-size: 0.85rem; font-weight: 500; }
         .slide-down { animation: slideDown 0.3s ease-out forwards; }
         @keyframes slideDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+        .success-banner { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #10b981; padding: 12px 20px; font-size: 0.85rem; font-weight: 700; margin-bottom: 24px; }
+        
+        .header-date-picker { display: flex; align-items: center; gap: 12px; background: var(--bg-sidebar); border: 1px solid var(--border-main); padding: 8px 16px; }
+        .header-date-picker label { font-size: 0.65rem; font-weight: 800; color: var(--text-dim); letter-spacing: 1px; }
+        .header-date-picker input { background: transparent; border: none; color: var(--primary); font-size: 0.85rem; font-weight: 800; outline: none; cursor: pointer; }
+        
+        .order-cell { display: flex; align-items: center; gap: 8px; justify-content: center; }
+        .qty-input { width: 70px; background: var(--bg-sidebar); border: 1px solid var(--border-main); color: var(--text-main); padding: 8px; font-size: 0.8rem; font-weight: 700; outline: none; }
+        .qty-input:focus { border-color: var(--primary); }
+        .btn-order { background: var(--primary); color: white; border: none; padding: 8px 12px; font-size: 0.65rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.2s; }
+        .btn-order:hover:not(:disabled) { background: #ea580c; }
+        .btn-order:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Rates */
+        .price-cell.buying { color: #3b82f6; }
+        .price-cell.selling { color: #10b981; }
+        .selling-price-wrap { display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .icon-btn-mini { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #10b981; padding: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: 0.2s; }
+        .icon-btn-mini:hover { background: #10b981; color: white; }
+
+        .rate-modal { max-width: 420px !important; }
+        .selling-tag { color: #10b981; border: 1px solid rgba(16,185,129,0.3); background: rgba(16,185,129,0.06); }
+        .item-hint { font-size: 0.75rem; color: var(--text-dim); margin-top: -16px; margin-bottom: 24px; font-weight: 700; }
+        
+        .rate-comparison { display: flex; align-items: center; gap: 12px; background: var(--bg-sidebar); padding: 16px; border: 1px solid var(--border-main); margin-bottom: 24px; }
+        .rc-box { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+        .rc-label { font-size: 0.55rem; font-weight: 800; color: var(--text-dim); letter-spacing: 0.5px; }
+        .rc-val { font-size: 1rem; font-weight: 800; color: var(--text-main); }
+        .rc-box.highlight .rc-val { color: #10b981; }
+        .rc-arrow { color: var(--text-dim); font-weight: 800; }
+
+        .input-with-icon { position: relative; display: flex; align-items: center; }
+        .input-with-icon svg { position: absolute; left: 12px; color: var(--text-dim); }
+        .input-with-icon input { padding-left: 36px !important; }
+        .margin-hint { font-size: 0.65rem; color: #10b981; font-weight: 700; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .spin { animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </MainLayout>
   );

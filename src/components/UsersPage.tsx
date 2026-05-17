@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { 
-  Search, 
-  ShieldCheck, 
-  MapPin, 
+import {
+  Search,
+  ShieldCheck,
+  MapPin,
   DollarSign,
   TrendingUp,
   Activity,
@@ -15,13 +15,13 @@ import ForgeLoader from './ForgeLoader';
 import { userApi, entityApi } from '../services/api';
 
 interface UsersPageProps {
-  roleType?: 'CENTER' | 'KITCHEN' | 'STORE' | 'RESORT' | 'AGGRIGATE';
+  roleType?: 'CENTER' | 'KITCHEN' | 'STORE' | 'RESORT' | 'AGGREGATE';
 }
 
 const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
   const navigate = useNavigate();
   const { entityId } = useParams<{ entityId: string }>();
-  
+
   const [users, setUsers] = useState<any[]>([]);
   const [entities, setEntities] = useState<any[]>([]);
   const [selectedEntity, setSelectedEntity] = useState<string>(entityId || '');
@@ -43,7 +43,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
         if (entityId) setSelectedEntity(entityId);
       }).catch(() => setError('Failed to load entities'));
     }
-    
+
     fetchUsers(userData, entityId || '');
   }, [roleType, entityId]);
 
@@ -71,7 +71,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
           res = await userApi.getMyStores(entityId);
         } else if (roleType === 'RESORT') {
           res = await userApi.getMyResorts(entityId);
-        } else if (roleType === 'AGGRIGATE') {
+        } else if (roleType === 'AGGREGATE') {
           res = await userApi.getMyAggregates(entityId);
         } else {
           res = await userApi.getAll(entityId);
@@ -84,7 +84,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
         res = await userApi.getMyStores();
       } else if (roleType === 'RESORT') {
         res = await userApi.getMyResorts();
-      } else if (roleType === 'AGGRIGATE') {
+      } else if (roleType === 'AGGREGATE') {
         res = await userApi.getMyAggregates();
       } else if (userData?.entity) {
         const id = userData.entity._id || userData.entity;
@@ -145,7 +145,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
       )}
 
       {/* Admin: Kitchen/Center/etc stats cards */}
-      {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGRIGATE') && (
+      {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE') && (
         <section className="kitchen-dashboard">
           <div className="stat-card">
             <div className="stat-icon"><DollarSign size={20} /></div>
@@ -176,13 +176,13 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
         <div className="data-panel">
           <div className="panel-header">
             <h2>{filtered.length} {roleType || 'TOTAL'} USERS{selectedEntity && isSuperAdmin ? ` — ${entities.find(e => e._id === selectedEntity)?.name?.toUpperCase() || ''}` : ''}</h2>
-            <div style={{display:'flex',gap:12,alignItems:'center'}}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <div className="search-box">
                 <Search size={14} />
                 <input type="text" placeholder="Search users..." value={search} onChange={e => setSearch(e.target.value)} />
               </div>
               {isSuperAdmin && selectedEntity && (
-                <button className="btn-primary" style={{fontSize:'0.7rem',padding:'6px 14px'}} onClick={() => navigate(`/entity/${selectedEntity}`)}>
+                <button className="btn-primary" style={{ fontSize: '0.7rem', padding: '6px 14px' }} onClick={() => navigate(`/entity/${selectedEntity}`)}>
                   MANAGE IN CONSOLE
                 </button>
               )}
@@ -190,7 +190,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
           </div>
 
           {/* Admin kitchen-card view for specific role types */}
-          {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGRIGATE') ? (
+          {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE') ? (
             <div className="kitchen-cards-container">
               {filtered.map((u) => (
                 <div key={u._id} className="kitchen-card">

@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Plus, ChevronRight, Loader2, Search,
   Building, Activity, Users, Bell,
-  Calendar, AlertTriangle, TrendingUp
+  Calendar, AlertTriangle, TrendingUp, DollarSign
 } from 'lucide-react';
-import { entityApi, eventApi, paymentApi } from '../services/api';
+import { entityApi, eventApi, paymentApi, financeApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -21,6 +21,7 @@ const Dashboard: React.FC = () => {
   const [user, setUser] = useState<any>(null);
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [adminPersonnel, setAdminPersonnel] = useState<any[]>([]);
+  const [financeStats, setFinanceStats] = useState<any>(null);
 
   // Revenue chart state
   const currentYear = new Date().getFullYear();
@@ -55,6 +56,14 @@ const Dashboard: React.FC = () => {
         setEntities(entityRes.data.data);
         setUpcomingRenewals(renewalRes.data.data || []);
         await fetchRevenue(selectedYear);
+      } else if (userData?.role === 'RESORT') {
+        const [finRes, personnelRes] = await Promise.all([
+          financeApi.getStats(),
+          entityApi.getAdmins(userData.entity?._id || userData.entity)
+        ]);
+        setFinanceStats(finRes.data.data);
+        setEntities([userData.entity]);
+        setAdminPersonnel(personnelRes.data.data);
       } else if (userData?.entity) {
         const userEntity = userData.entity;
         setEntities([userEntity]);
@@ -251,22 +260,51 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </>
+      ) : user?.role === 'RESORT' ? (
+        <>
+          <section className="stats-grid">
+            <div className="stat-card">
+              <div className="stat-icon"><DollarSign size={20} /></div>
+              <div className="stat-info"><label>MONTHLY REVENUE</label><h3>₹{(financeStats?.monthlyRevenue || 0).toLocaleString()}</h3></div>
+            </div>
+            <div className="stat-card">
+              <div className="stat-icon"><TrendingUp size={20} /></div>
+              <div className="stat-info"><label>ACTIVE EXPENSES</label><h3>₹{(financeStats?.monthlyExpenses || 0).toLocaleString()}</h3></div>
+            </div>
+            <div className="stat-card clickable" onClick={() => navigate('/finance')}>
+              <div className="stat-icon"><Activity size={20} /></div>
+              <div className="stat-info"><label>FINANCE MODULE</label><h3>ACCESS</h3></div>
+              <div className="stat-trend"><ChevronRight size={14} /></div>
+            </div>
+          </section>
+        </>
       ) : (
         // Admin / Partner stats
         <section className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon"><Building size={20} /></div>
-            <div className="stat-info"><label>MY BUSINESS UNIT</label><h3>{entities[0]?.name?.toUpperCase() || 'UNLINKED'}</h3></div>
+            <div className="stat-info">
+              <label>{user?.role === 'CENTERS' ? 'MY CENTER' : 'MY BUSINESS UNIT'}</label>
+              <h3>{entities[0]?.name?.toUpperCase() || 'UNLINKED'}</h3>
+            </div>
           </div>
           <div className="stat-card">
             <div className="stat-icon"><Users size={20} /></div>
             <div className="stat-info"><label>ACTIVE PERSONNEL</label><h3>{adminPersonnel.length}</h3></div>
           </div>
-          <div className="stat-card clickable" onClick={() => navigate(`/entity/${user?.entity?._id || user?.entity}`)}>
-            <div className="stat-icon"><Activity size={20} /></div>
-            <div className="stat-info"><label>OPERATIONAL STATUS</label><h3>ACTIVE</h3></div>
-            <div className="stat-trend"><ChevronRight size={14} /></div>
-          </div>
+          {user?.role === 'CENTERS' ? (
+            <div className="stat-card clickable" onClick={() => navigate('/food-requests')}>
+              <div className="stat-icon"><Activity size={20} /></div>
+              <div className="stat-info"><label>FOOD REQUESTS</label><h3>VIEW</h3></div>
+              <div className="stat-trend"><ChevronRight size={14} /></div>
+            </div>
+          ) : (
+            <div className="stat-card clickable" onClick={() => navigate(`/entity/${user?.entity?._id || user?.entity}`)}>
+              <div className="stat-icon"><Activity size={20} /></div>
+              <div className="stat-info"><label>OPERATIONAL STATUS</label><h3>ACTIVE</h3></div>
+              <div className="stat-trend"><ChevronRight size={14} /></div>
+            </div>
+          )}
         </section>
       )}
 
