@@ -4,6 +4,7 @@ import { rawMaterialApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { Plus, Search, Loader2, X, Edit2, Trash2, Package, Hash } from 'lucide-react';
 import { useParams } from 'react-router-dom';
+import { ITEM_CATEGORIES } from '../constants/categories';
 
 const UNITS = ['kg', 'ltr', 'pcs', 'gm', 'ml', 'custom'];
 
@@ -21,6 +22,7 @@ const ItemConfigPage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     vendorName: '',
+    category: '',
     unit: 'kg',
     customUnit: '',
     minimumStock: '',
@@ -34,7 +36,8 @@ const ItemConfigPage: React.FC = () => {
       materials.filter(m =>
         m.name.toLowerCase().includes(term) ||
         m.simpleCode.includes(term) ||
-        (m.vendorName || '').toLowerCase().includes(term)
+        (m.vendorName || '').toLowerCase().includes(term) ||
+        (m.category || '').toLowerCase().includes(term)
       )
     );
   }, [searchTerm, materials]);
@@ -54,7 +57,7 @@ const ItemConfigPage: React.FC = () => {
 
   const openCreateModal = () => {
     setEditingId(null);
-    setFormData({ name: '', vendorName: '', unit: 'kg', customUnit: '', minimumStock: '' });
+    setFormData({ name: '', vendorName: '', category: '', unit: 'kg', customUnit: '', minimumStock: '' });
     setError('');
     setIsModalOpen(true);
   };
@@ -64,6 +67,7 @@ const ItemConfigPage: React.FC = () => {
     setFormData({
       name: m.name,
       vendorName: m.vendorName || '',
+      category: m.category || '',
       unit: m.unit,
       customUnit: m.customUnit || '',
       minimumStock: m.minimumStock.toString(),
@@ -95,6 +99,7 @@ const ItemConfigPage: React.FC = () => {
       const payload = {
         name: formData.name,
         vendorName: formData.vendorName,
+        category: formData.category,
         unit: formData.unit,
         minimumStock: Number(formData.minimumStock),
         ...(formData.unit === 'custom' && { customUnit: formData.customUnit }),
@@ -127,7 +132,7 @@ const ItemConfigPage: React.FC = () => {
     <MainLayout>
       <header className="page-header">
         <div className="header-title">
-          <h1>ITEM CONFIGURATION</h1>
+          <h1>RAW MATERIAL</h1>
           <p className="subtitle">RAW MATERIAL REGISTRY &amp; STOCK THRESHOLDS</p>
         </div>
         <button className="btn-primary" onClick={openCreateModal}>
@@ -183,6 +188,7 @@ const ItemConfigPage: React.FC = () => {
                 <tr>
                   <th>CODE</th>
                   <th>MATERIAL NAME</th>
+                  <th>CATEGORY</th>
                   <th>VENDOR</th>
                   <th>UNIT</th>
                   <th>MIN. STOCK</th>
@@ -203,6 +209,11 @@ const ItemConfigPage: React.FC = () => {
                         <div className="mat-avatar">{m.name[0]}</div>
                         <strong>{m.name.toUpperCase()}</strong>
                       </div>
+                    </td>
+                    <td>
+                      {m.category
+                        ? <span className="category-tag">{m.category}</span>
+                        : <span className="no-vendor">—</span>}
                     </td>
                     <td>
                       <span className="vendor-name">{m.vendorName || <span className="no-vendor">—</span>}</span>
@@ -284,6 +295,17 @@ const ItemConfigPage: React.FC = () => {
                   required
                   placeholder="e.g. Tomato Paste"
                 />
+              </div>
+
+              {/* Category */}
+              <div className="form-group">
+                <label>CATEGORY</label>
+                <select name="category" value={formData.category} onChange={handleInputChange}>
+                  <option value="">Select Category</option>
+                  {ITEM_CATEGORIES.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
               </div>
 
               {/* Vendor Name */}
@@ -382,6 +404,7 @@ const ItemConfigPage: React.FC = () => {
 
         .vendor-name { font-size: 0.8rem; color: var(--text-muted); font-weight: 500; }
         .no-vendor { color: var(--text-dim); opacity: 0.4; }
+        .category-tag { background: rgba(168,85,247,0.08); color: #a855f7; font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border: 1px solid rgba(168,85,247,0.2); }
 
         .unit-tag { background: rgba(249,115,22,0.08); color: var(--primary); font-size: 0.7rem; font-weight: 800; padding: 3px 8px; border: 1px solid rgba(249,115,22,0.2); }
 

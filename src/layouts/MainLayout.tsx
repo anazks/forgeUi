@@ -211,7 +211,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                     <ClipboardList size={18} /><span>BOM</span>
                   </button>
                   <button className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`} onClick={() => navTo('/item-config', 'item-config')}>
-                    <Settings2 size={18} /><span>Item Config</span>
+                    <Settings2 size={18} /><span>Raw Material</span>
                   </button>
                   <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
                     <UtensilsCrossed size={18} /><span>Food Requests</span>

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { vendorApi, employeeApi, bankApi, eventApi, expenseApi } from '../services/api';
+import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { 
   Database, Users, Building2, Landmark, 
@@ -37,7 +38,7 @@ const MasterDatabasePage: React.FC = () => {
   const [formData, setFormData] = useState<any>({
     // Vendor fields
     vendorCode: '', vendorName: '', address: '', gstNumber: '',
-    vendorCategory: '', contactPersonName: '', contactNumber: '',
+    vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
     contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
     bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
     // Employee fields
@@ -149,7 +150,7 @@ const MasterDatabasePage: React.FC = () => {
       setShowModal(false);
       setFormData({
         vendorCode: '', vendorName: '', address: '', gstNumber: '',
-        vendorCategory: '', contactPersonName: '', contactNumber: '',
+        vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
         contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
         bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
         employeeCode: '', employeeName: '', designation: '', department: 'Finance',
@@ -276,7 +277,14 @@ const MasterDatabasePage: React.FC = () => {
                             <span className="person-sub">{v.contactPersonName || '—'}</span>
                           </div>
                         </td>
-                        <td><span className="unit-tag">{v.vendorCategory}</span></td>
+                        <td>
+                          <div className="flex-wrap gap-1" style={{ justifyContent: 'center' }}>
+                            {(v.vendorCategories || (v.vendorCategory ? [v.vendorCategory] : [])).map((cat: string) => (
+                              <span key={cat} className="unit-tag" style={{ fontSize: '10px', margin: '2px' }}>{cat}</span>
+                            ))}
+                            {(!v.vendorCategories?.length && !v.vendorCategory) && <span className="text-dim">—</span>}
+                          </div>
+                        </td>
                         <td><span className="gst-badge">{v.gstNumber || '—'}</span></td>
                         <td>
                           <div className="credit-cell">
@@ -494,19 +502,25 @@ const MasterDatabasePage: React.FC = () => {
                     <input name="vendorName" value={formData.vendorName} onChange={handleInputChange} required placeholder="Acme Supplies Ltd" />
                   </div>
                   <div className="input-group">
-                    <label>CATEGORY</label>
-                    <select name="vendorCategory" value={formData.vendorCategory} onChange={handleInputChange} required>
-                      <option value="">Select Category</option>
-                      <option value="Raw Material">Raw Material</option>
-                      <option value="Packaging">Packaging</option>
-                      <option value="Vegetable">Vegetable</option>
-                      <option value="Dairy">Dairy</option>
-                      <option value="Beverage">Beverage</option>
-                      <option value="Bakery">Bakery</option>
-                      <option value="Cleaning Supplies">Cleaning Supplies</option>
-                      <option value="Transport">Transport</option>
-                      <option value="Others">Others</option>
-                    </select>
+                    <label>CATEGORIES <span style={{ fontWeight: 400, fontSize: '0.6rem' }}>(select all that apply)</span></label>
+                    <div className="category-checkboxes">
+                      {ITEM_CATEGORIES.map(cat => (
+                        <label key={cat} className="cat-check-label">
+                          <input
+                            type="checkbox"
+                            checked={formData.vendorCategories?.includes(cat) || false}
+                            onChange={() => {
+                              const current = formData.vendorCategories || [];
+                              const updated = current.includes(cat)
+                                ? current.filter((c: string) => c !== cat)
+                                : [...current, cat];
+                              setFormData((prev: any) => ({ ...prev, vendorCategories: updated }));
+                            }}
+                          />
+                          {cat}
+                        </label>
+                      ))}
+                    </div>
                   </div>
                   <div className="input-group">
                     <label>GST NUMBER</label>
@@ -922,6 +936,10 @@ const MasterDatabasePage: React.FC = () => {
         .input-group label { display: block; font-size: 0.65rem; font-weight: 800; color: var(--text-dim); margin-bottom: 6px; }
         .input-group input, .input-group select { width: 100%; background: var(--bg-main); border: 1px solid var(--border-main); padding: 10px; color: var(--text-main); font-size: 0.85rem; outline: none; }
         .input-group input:focus { border-color: var(--primary); }
+        .category-checkboxes { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+        .cat-check-label { display: flex; align-items: center; gap: 5px; font-size: 0.72rem; color: var(--text-muted); cursor: pointer; background: var(--bg-main); border: 1px solid var(--border-main); padding: 4px 8px; transition: 0.15s; }
+        .cat-check-label:hover { border-color: var(--primary); color: var(--primary); }
+        .cat-check-label input[type=checkbox] { accent-color: var(--primary); width: 12px; height: 12px; }
 
         .modal-footer { padding: 20px; border-top: 1px solid var(--border-main); display: flex; justify-content: flex-end; gap: 12px; background: rgba(0,0,0,0.1); }
         .btn-cancel { background: transparent; border: 1px solid var(--border-main); color: var(--text-muted); padding: 10px 20px; font-weight: 800; font-size: 0.75rem; cursor: pointer; }

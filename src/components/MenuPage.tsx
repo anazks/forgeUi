@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import MainLayout from '../layouts/MainLayout';
 import { menuApi, bomApi, userApi, foodRequestApi } from '../services/api';
+import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { Plus, Search, Loader2, X, Edit2, Trash2, BookOpen, ClipboardList, IndianRupee } from 'lucide-react';
 import { useParams } from 'react-router-dom';
@@ -35,7 +36,7 @@ const MenuPage: React.FC = () => {
   // Form State
   const [formData, setFormData] = useState({
     name: '',
-    unitPrice: '',
+    category: '',
     unit: 'kg',
     customUnit: ''
   });
@@ -92,45 +93,46 @@ const MenuPage: React.FC = () => {
     }
   };
 
-  // Combine & filter
+  // ── Build display lists ──────────────────────────────────────────────
+  // DIRECT: all items from menus array (no type filter needed)
   const directItems = menus.map(m => {
-    // If user is a CENTER, find their specific rate
-    let finalPrice = m.unitPrice;
-    let sellingPrice = m.unitPrice;
+    let finalPrice: number | null = null;
+    let sellingPrice: number | null = null;
     if (user?.role === 'CENTERS') {
       const customRate = centerRates.find(r => r.menu?._id === m._id && (r.center?._id === user._id || r.center === user._id));
-      if (customRate) {
-        finalPrice = customRate.rate;
-        sellingPrice = customRate.centerRate || customRate.rate;
-      }
+      if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
     }
     return { ...m, _source: 'DIRECT', displayPrice: finalPrice, sellingPrice };
   });
 
+  // BOM: from boms array — each BOM dish appears as a BOM-source item
   const bomItems = boms.map(b => {
-    let finalPrice = b.kitchenPrice || 0;
-    let sellingPrice = b.kitchenPrice || 0;
+    let finalPrice: number | null = b.kitchenPrice > 0 ? b.kitchenPrice : null;
+    let sellingPrice: number | null = finalPrice;
     if (user?.role === 'CENTERS') {
       const customRate = centerRates.find(r => r.bom?._id === b._id && (r.center?._id === user._id || r.center === user._id));
-      if (customRate) {
-        finalPrice = customRate.rate;
-        sellingPrice = customRate.centerRate || customRate.rate;
-      }
+      if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
     }
     return {
       _id: b._id,
       _source: 'BOM',
       name: b.dishName,
-      unitPrice: b.kitchenPrice || 0,
       displayPrice: finalPrice,
       sellingPrice,
-      unit: 'pcs',
+      unit: b.unit || 'pcs',
+      customUnit: '',
       ingredientCount: b.items?.length || 0,
       createdAt: b.createdAt,
     };
   });
 
-  const allItems = [...directItems, ...bomItems];
+  // Merge and sort A–Z
+  const allItems = [...directItems, ...bomItems].sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '')
+  );
+
+  const directCount = directItems.length;
+  const bomCount = bomItems.length;
 
   const filtered = allItems.filter(item => {
     const matchSearch = item.name?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -194,7 +196,7 @@ const MenuPage: React.FC = () => {
     setEditingId(menu._id);
     setFormData({
       name: menu.name,
-      unitPrice: menu.unitPrice.toString(),
+      category: menu.category || '',
       unit: menu.unit,
       customUnit: menu.customUnit || ''
     });
@@ -212,7 +214,7 @@ const MenuPage: React.FC = () => {
   };
 
   const handleDeleteBom = async (id: string) => {
-    if (!window.confirm('Delete this BOM dish from menu?')) return;
+    if (!window.confirm('Delete this BOM dish?')) return;
     try {
       await bomApi.delete(id);
       fetchMenus();
@@ -223,7 +225,7 @@ const MenuPage: React.FC = () => {
 
   const openCreateModal = () => {
     setEditingId(null);
-    setFormData({ name: '', unitPrice: '', unit: 'kg', customUnit: '' });
+    setFormData({ name: '', category: '', unit: 'kg', customUnit: '' });
     setIsModalOpen(true);
   };
 
@@ -263,9 +265,9 @@ const MenuPage: React.FC = () => {
     try {
       setIsSubmitting(true);
       setError('');
-      const payload = {
+      const payload: any = {
         name: formData.name,
-        unitPrice: Number(formData.unitPrice),
+        category: formData.category,
         unit: formData.unit,
         ...(formData.unit === 'custom' && { customUnit: formData.customUnit })
       };
@@ -276,7 +278,7 @@ const MenuPage: React.FC = () => {
       }
       setIsModalOpen(false);
       setEditingId(null);
-      setFormData({ name: '', unitPrice: '', unit: 'kg', customUnit: '' });
+      setFormData({ name: '', category: '', unit: 'kg', customUnit: '' });
       fetchMenus();
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to save menu item');
@@ -324,13 +326,13 @@ const MenuPage: React.FC = () => {
         <div className="msm-divider" />
         <div className="msm-stat">
           <BookOpen size={14} />
-          <span className="msm-val">{menus.length}</span>
+          <span className="msm-val">{directCount}</span>
           <span className="msm-label">DIRECT</span>
         </div>
         <div className="msm-divider" />
         <div className="msm-stat">
           <ClipboardList size={14} />
-          <span className="msm-val">{boms.length}</span>
+          <span className="msm-val">{bomCount}</span>
           <span className="msm-label">FROM BOM</span>
         </div>
       </div>
@@ -347,7 +349,7 @@ const MenuPage: React.FC = () => {
               >
                 {tab === 'all' ? 'ALL ITEMS' : tab === 'direct' ? 'DIRECT' : 'FROM BOM'}
                 <span className="tab-count">
-                  {tab === 'all' ? allItems.length : tab === 'direct' ? menus.length : boms.length}
+                  {tab === 'all' ? allItems.length : tab === 'direct' ? directCount : bomCount}
                 </span>
               </button>
             ))}
@@ -378,7 +380,7 @@ const MenuPage: React.FC = () => {
                   ) : (
                     <th>BASE PRICE (₹)</th>
                   )}
-                  <th>UNIT / INGREDIENTS</th>
+                  <th>UNIT</th>
                   {user?.role === 'CENTERS' ? (
                     <th style={{ width: '250px' }}>REQUEST QUANTITY</th>
                   ) : (
@@ -403,10 +405,12 @@ const MenuPage: React.FC = () => {
                     </td>
                     {user?.role === 'CENTERS' ? (
                       <>
-                        <td className="price-cell buying">₹ {(item.displayPrice || 0).toFixed(2)}</td>
+                        <td className="price-cell buying">
+                          {item.displayPrice != null ? `₹ ${item.displayPrice.toFixed(2)}` : '—'}
+                        </td>
                         <td className="price-cell selling">
                           <div className="selling-price-wrap">
-                            ₹ {(item.sellingPrice || 0).toFixed(2)}
+                            {item.sellingPrice != null ? `₹ ${item.sellingPrice.toFixed(2)}` : '—'}
                             <button className="icon-btn-mini" onClick={() => openRateEdit(item)} title="Edit Selling Price">
                               <Edit2 size={10} />
                             </button>
@@ -414,16 +418,14 @@ const MenuPage: React.FC = () => {
                         </td>
                       </>
                     ) : (
-                      <td className="price-cell">₹ {(item.displayPrice || 0).toFixed(2)}</td>
+                      <td className="price-cell">
+                        {item.displayPrice != null ? `₹ ${item.displayPrice.toFixed(2)}` : '—'}
+                      </td>
                     )}
                     <td>
-                      {item._source === 'DIRECT' ? (
-                        <span className="unit-tag">
-                          {item.unit === 'custom' ? item.customUnit?.toUpperCase() : item.unit?.toUpperCase()}
-                        </span>
-                      ) : (
-                        <span className="ing-count">{item.ingredientCount} INGREDIENTS</span>
-                      )}
+                      <span className="unit-tag">
+                        {(item.unit === 'custom' ? item.customUnit : item.unit)?.toUpperCase() || '—'}
+                      </span>
                     </td>
                     {user?.role === 'CENTERS' ? (
                       <td>
@@ -530,64 +532,45 @@ const MenuPage: React.FC = () => {
         </div>
       )}
 
-      {/* Add Direct Menu Item Modal */}
+      {/* Add / Edit Direct Menu Item Modal */}
       {isModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content">
             <button className="close-btn" onClick={() => setIsModalOpen(false)}><X size={20} /></button>
             <div className="modal-tag direct-tag"><BookOpen size={12} /> DIRECT MENU ITEM</div>
-            <h2>{editingId ? 'Edit Menu Item' : 'Create Menu Item'}</h2>
+            <h2>{editingId ? 'Edit Menu Item' : 'Add Direct Item'}</h2>
             {error && <div className="error-message">{error}</div>}
 
             <form onSubmit={handleSubmit} className="standard-form">
               <div className="form-group">
                 <label>Item Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  required
-                  placeholder="e.g. Chicken Biryani"
-                />
+                <input type="text" name="name" value={formData.name} onChange={handleInputChange} required placeholder="e.g. Bread, Milk, Oil" />
               </div>
 
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Unit Price (₹)</label>
-                  <input
-                    type="number"
-                    name="unitPrice"
-                    value={formData.unitPrice}
-                    onChange={handleInputChange}
-                    required
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                  />
-                </div>
-                <div className="form-group">
-                  <label>Unit of Measure</label>
-                  <select name="unit" value={formData.unit} onChange={handleInputChange}>
-                    <option value="kg">Kilogram (kg)</option>
-                    <option value="ltr">Liter (ltr)</option>
-                    <option value="pcs">Pieces (pcs)</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </div>
+              <div className="form-group">
+                <label>Category</label>
+                <select name="category" value={formData.category} onChange={handleInputChange}>
+                  <option value="">Select Category</option>
+                  {ITEM_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Unit of Measure</label>
+                <select name="unit" value={formData.unit} onChange={handleInputChange}>
+                  <option value="kg">Kilogram (kg)</option>
+                  <option value="ltr">Liter (ltr)</option>
+                  <option value="pcs">Pieces (pcs)</option>
+                  <option value="gm">Gram (gm)</option>
+                  <option value="ml">Milliliter (ml)</option>
+                  <option value="custom">Custom</option>
+                </select>
               </div>
 
               {formData.unit === 'custom' && (
                 <div className="form-group slide-down">
                   <label>Custom Unit Name</label>
-                  <input
-                    type="text"
-                    name="customUnit"
-                    value={formData.customUnit}
-                    onChange={handleInputChange}
-                    required
-                    placeholder="e.g. Box, Plate, Dozen"
-                  />
+                  <input type="text" name="customUnit" value={formData.customUnit} onChange={handleInputChange} required placeholder="e.g. Box, Plate, Dozen" />
                 </div>
               )}
 
@@ -629,6 +612,13 @@ const MenuPage: React.FC = () => {
         .search-box svg { position: absolute; left: 12px; color: var(--text-dim); }
 
         .sharp-table th, .sharp-table td { text-align: center; vertical-align: middle; }
+
+        /* Item type toggle */
+        .type-toggle { display: flex; gap: 8px; margin-top: 4px; }
+        .type-btn { display: flex; align-items: center; gap: 6px; padding: 8px 16px; border: 1px solid var(--border-main); background: none; color: var(--text-muted); font-size: 0.75rem; font-weight: 800; cursor: pointer; transition: 0.2s; }
+        .type-btn:hover { border-color: var(--text-main); color: var(--text-main); }
+        .type-btn.active { border-color: var(--primary); color: var(--primary); background: rgba(249,115,22,0.06); }
+        .field-hint { font-size: 0.68rem; color: #a855f7; font-weight: 600; margin-top: 8px; }
 
         /* Source tags */
         .source-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 0.62rem; font-weight: 800; padding: 3px 8px; border: 1px solid; }

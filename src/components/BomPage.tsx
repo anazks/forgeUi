@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import MainLayout from '../layouts/MainLayout';
-import { bomApi, rawMaterialApi } from '../services/api';
+import { bomApi, rawMaterialApi, menuApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
-import { Plus, Search, Loader2, X, Edit2, Trash2, Trash, ChevronDown, Check } from 'lucide-react';
+import { Plus, Search, Loader2, X, Edit2, Trash2, Trash, ChevronDown } from 'lucide-react';
 import { useParams } from 'react-router-dom';
 
 /* ─── Searchable Material Dropdown ─────────────────────────────────── */
-interface Material { _id: string; name: string; simpleCode: string; unit: string; customUnit?: string; }
+interface Material { _id: string; name: string; simpleCode: string; unit: string; customUnit?: string; sourceType?: 'raw' | 'menu'; }
 
 interface MaterialDropdownProps {
   materials: Material[];
@@ -46,7 +46,12 @@ const MaterialDropdown: React.FC<MaterialDropdownProps> = ({ materials, selected
       >
         {selected ? (
           <span className="mat-selected">
-            <span className="mat-code">{selected.simpleCode}</span>
+            {selected.sourceType === 'raw'
+              ? <span className="mat-code">{selected.simpleCode}</span>
+              : selected.sourceType === 'bom'
+              ? <span className="mat-code bom-src">BOM</span>
+              : <span className="mat-code menu-src">MENU</span>
+            }
             <span>{selected.name}</span>
           </span>
         ) : (
@@ -69,7 +74,7 @@ const MaterialDropdown: React.FC<MaterialDropdownProps> = ({ materials, selected
           </div>
           <div className="mat-options">
             {filtered.length === 0 ? (
-              <div className="mat-empty">No materials found</div>
+              <div className="mat-empty">No ingredients found</div>
             ) : (
               filtered.map(m => (
                 <button
@@ -78,10 +83,14 @@ const MaterialDropdown: React.FC<MaterialDropdownProps> = ({ materials, selected
                   className={`mat-option ${selectedId === m._id ? 'active' : ''}`}
                   onClick={() => { onChange(m); setOpen(false); }}
                 >
-                  <span className="mat-opt-code">{m.simpleCode}</span>
+                  {m.sourceType === 'raw'
+                    ? <span className="mat-opt-code">{m.simpleCode}</span>
+                    : m.sourceType === 'bom'
+                    ? <span className="mat-opt-code bom-src">BOM</span>
+                    : <span className="mat-opt-code menu-src">MENU</span>
+                  }
                   <span className="mat-opt-name">{m.name}</span>
                   <span className="mat-opt-unit">{getUnitLabel(m)}</span>
-                  {selectedId === m._id && <Check size={12} />}
                 </button>
               ))
             )}
@@ -97,6 +106,7 @@ const BomPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
   const [boms, setBoms] = useState<any[]>([]);
   const [rawMaterials, setRawMaterials] = useState<Material[]>([]);
+  const [menuItems, setMenuItems] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -104,6 +114,8 @@ const BomPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [dishName, setDishName] = useState('');
+  const [dishUnit, setDishUnit] = useState('pcs');
+  const [dishCustomUnit, setDishCustomUnit] = useState('');
   const [kitchenPrice, setKitchenPrice] = useState('');
   const [items, setItems] = useState<any[]>([{
     materialId: '',
@@ -117,15 +129,21 @@ const BomPage: React.FC = () => {
   useEffect(() => {
     fetchBoms();
     fetchMaterials();
+    fetchMenuItems();
   }, []);
+
+  const fetchMenuItems = async () => {
+    try {
+      const res = await menuApi.getAll(entityId);
+      setMenuItems(res.data.data || []);
+    } catch { }
+  };
 
   const fetchMaterials = async () => {
     try {
       const res = await rawMaterialApi.getAll(entityId);
       setRawMaterials(res.data.data || []);
-    } catch {
-      // silently fail
-    }
+    } catch { }
   };
 
   const fetchBoms = async () => {
@@ -140,6 +158,14 @@ const BomPage: React.FC = () => {
     }
   };
 
+  // Silent refresh — no loader shown, used when opening the modal
+  const fetchBomsQuiet = async () => {
+    try {
+      const res = await bomApi.getAll(entityId);
+      setBoms(res.data.data || []);
+    } catch { }
+  };
+
   const handleMaterialSelect = (index: number, material: Material | null) => {
     const newItems = [...items];
     if (material) {
@@ -147,6 +173,10 @@ const BomPage: React.FC = () => {
       newItems[index].itemName = material.name;
       newItems[index].unit = material.unit;
       newItems[index].customUnit = material.customUnit || '';
+      // Auto-set type based on source
+      if (material.sourceType === 'bom') newItems[index].type = 'BOM Item';
+      else if (material.sourceType === 'menu') newItems[index].type = 'Raw Material';
+      // else keep existing type for raw materials
     } else {
       newItems[index].materialId = '';
       newItems[index].itemName = '';
@@ -170,18 +200,24 @@ const BomPage: React.FC = () => {
     setItems(newItems);
   };
 
-  const openCreateModal = () => {
+  const openCreateModal = async () => {
     setEditingId(null);
     setDishName('');
+    setDishUnit('pcs');
+    setDishCustomUnit('');
     setKitchenPrice('');
     setItems([{ materialId: '', itemName: '', quantity: '', unit: 'kg', customUnit: '', type: 'Raw Material' }]);
     setError('');
+    // Refresh all ingredient sources fresh (silent — no loader)
+    await Promise.allSettled([fetchMaterials(), fetchMenuItems(), fetchBomsQuiet()]);
     setIsModalOpen(true);
   };
 
-  const handleEdit = (bom: any) => {
+  const handleEdit = async (bom: any) => {
     setEditingId(bom._id);
-    setDishName(bom.dishName);
+    setDishName(bom.dishName || '');
+    setDishUnit(bom.unit || 'pcs');
+    setDishCustomUnit(bom.customUnit || '');
     setKitchenPrice(bom.kitchenPrice?.toString() || '0');
     setItems(bom.items.map((i: any) => ({
       materialId: i.materialId || '',
@@ -192,6 +228,8 @@ const BomPage: React.FC = () => {
       type: i.type
     })));
     setError('');
+    // Refresh all ingredient sources fresh (silent — no loader)
+    await Promise.allSettled([fetchMaterials(), fetchMenuItems(), fetchBomsQuiet()]);
     setIsModalOpen(true);
   };
 
@@ -207,7 +245,10 @@ const BomPage: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Validate all items have a material selected
+    if (!dishName.trim()) {
+      setError('Please enter a dish name');
+      return;
+    }
     const unset = items.findIndex(i => !i.itemName.trim());
     if (unset !== -1) {
       setError(`Please select a material for ingredient row ${unset + 1}`);
@@ -217,7 +258,9 @@ const BomPage: React.FC = () => {
       setIsSubmitting(true);
       setError('');
       const payload = {
-        dishName,
+        dishName: dishName.trim(),
+        unit: dishUnit,
+        ...(dishUnit === 'custom' && { customUnit: dishCustomUnit }),
         kitchenPrice: Number(kitchenPrice) || 0,
         items: items.map(i => ({
           itemName: i.itemName,
@@ -328,9 +371,32 @@ const BomPage: React.FC = () => {
                     value={dishName}
                     onChange={(e) => setDishName(e.target.value)}
                     required
-                    placeholder="e.g. Butter Chicken"
+                    placeholder="e.g. Butter Chicken, Paneer Tikka"
                   />
                 </div>
+                <div className="form-group">
+                  <label>Unit <span className="auto-label">(mandatory)</span></label>
+                  <select value={dishUnit} onChange={(e) => setDishUnit(e.target.value)} required>
+                    <option value="pcs">Pieces (pcs)</option>
+                    <option value="kg">Kilogram (kg)</option>
+                    <option value="ltr">Liter (ltr)</option>
+                    <option value="gm">Gram (gm)</option>
+                    <option value="ml">Milliliter (ml)</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+                {dishUnit === 'custom' && (
+                  <div className="form-group slide-down">
+                    <label>Custom Unit Name</label>
+                    <input
+                      type="text"
+                      value={dishCustomUnit}
+                      onChange={(e) => setDishCustomUnit(e.target.value)}
+                      required
+                      placeholder="e.g. Portion, Plate, Dozen"
+                    />
+                  </div>
+                )}
                 <div className="form-group">
                   <label>Kitchen Price (₹)</label>
                   <div className="price-input-wrap">
@@ -356,9 +422,9 @@ const BomPage: React.FC = () => {
                   </button>
                 </div>
 
-                {rawMaterials.length === 0 && (
+                {rawMaterials.length === 0 && menuItems.length === 0 && (
                   <div className="no-materials-warn">
-                    ⚠ No items found in Item Config. Add raw materials first for quick selection.
+                    ⚠ No raw materials or menu items found. Add items in Raw Material or Menu Management first.
                   </div>
                 )}
 
@@ -380,9 +446,15 @@ const BomPage: React.FC = () => {
 
                       {/* Material selector */}
                       <div className="form-group full-width">
-                        <label>Select Ingredient</label>
+                        <label>Select Ingredient <span className="auto-label">(raw material or prepared dish)</span></label>
                         <MaterialDropdown
-                          materials={rawMaterials}
+                          materials={[
+                            ...rawMaterials.map(m => ({ ...m, sourceType: 'raw' as const })),
+                            ...menuItems.map(m => ({ ...m, simpleCode: 'MENU', sourceType: 'menu' as const })),
+                            ...boms
+                              .filter(b => b._id !== editingId)
+                              .map(b => ({ _id: b._id, name: b.dishName, simpleCode: 'BOM', unit: b.unit || 'pcs', customUnit: b.customUnit || '', sourceType: 'bom' as const }))
+                          ]}
                           selectedId={item.materialId}
                           onChange={(mat) => handleMaterialSelect(index, mat)}
                         />
@@ -509,6 +581,8 @@ const BomPage: React.FC = () => {
         .mat-placeholder { color: var(--text-dim); }
         .mat-selected { display: flex; align-items: center; gap: 8px; }
         .mat-code { font-family: monospace; font-size: 0.7rem; color: var(--primary); background: rgba(249,115,22,0.08); border: 1px solid rgba(249,115,22,0.15); padding: 1px 6px; }
+        .mat-code.menu-src { color: #a855f7; background: rgba(168,85,247,0.08); border-color: rgba(168,85,247,0.2); }
+        .mat-code.bom-src { color: #10b981; background: rgba(16,185,129,0.08); border-color: rgba(16,185,129,0.2); }
         .chevron { transition: transform 0.2s; flex-shrink: 0; }
         .chevron.rotated { transform: rotate(180deg); }
 
@@ -524,6 +598,8 @@ const BomPage: React.FC = () => {
         .mat-option:hover { background: var(--row-hover); }
         .mat-option.active { background: rgba(249,115,22,0.06); }
         .mat-opt-code { font-family: monospace; font-size: 0.7rem; color: var(--primary); min-width: 36px; }
+        .mat-opt-code.menu-src { color: #a855f7; }
+        .mat-opt-code.bom-src { color: #10b981; }
         .mat-opt-name { flex: 1; font-size: 0.82rem; font-weight: 600; color: var(--text-main); }
         .mat-opt-unit { font-size: 0.65rem; font-weight: 800; color: var(--text-dim); background: var(--border-main); padding: 1px 6px; }
         .mat-empty { padding: 20px; text-align: center; color: var(--text-dim); font-size: 0.8rem; }
