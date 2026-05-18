@@ -72,6 +72,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const isStore = user?.role === 'STORE';
   const isPartner = user?.role === 'PARTNER';
+  const isCOO = user?.role === 'COO';
   const isResort = user?.role === 'RESORT';
   const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN';
 
@@ -151,6 +152,38 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
               <p className="section-title">System</p>
               <nav className="sidebar-nav">
                 <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
+                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+
+        /* COO role: Dashboard + Stock Requests + Inventory + New Purchase */
+        ) : isCOO ? (
+          <div className="sidebar-scrollable">
+            <div className="sidebar-section">
+              <p className="section-title">COO</p>
+              <nav className="sidebar-nav">
+                <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                  <LayoutDashboard size={18} /><span>Dashboard</span>
+                </button>
+                <button className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`} onClick={() => navigate('/store-requests')}>
+                  <UtensilsCrossed size={18} /><span>Stock Requests</span>
+                  <span className="nav-notification-dot"></span>
+                </button>
+                <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
+                  <Package size={18} /><span>Inventory</span>
+                </button>
+                <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
+                  <ShoppingBag size={18} /><span>New Purchase</span>
+                </button>
+              </nav>
+            </div>
+            <div className="sidebar-section">
+              <p className="section-title">System</p>
+              <nav className="sidebar-nav">
                 <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
                   {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
                   <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>

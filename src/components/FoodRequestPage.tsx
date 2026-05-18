@@ -77,9 +77,8 @@ const FoodRequestPage: React.FC = () => {
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const isCenter = user?.role === 'CENTERS';
-  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
-
-  const [activeTab, setActiveTab] = useState<'CONSOLIDATED' | 'INDIVIDUAL'>(isStore ? 'CONSOLIDATED' : 'INDIVIDUAL');
+  // COO has the same consolidated view as Store Manager
+  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
 
   useEffect(() => {
     fetchRequests();
@@ -94,13 +93,28 @@ const FoodRequestPage: React.FC = () => {
 
   const fetchLocationsAndVendors = async () => {
     try {
-      const [locRes, venRes] = await Promise.all([
+      const [locRes, venRes, billsRes] = await Promise.all([
         userApi.getLocations(entityId),
-        vendorApi.getAll()
+        vendorApi.getAll(),
+        purchaseApi.getBills()  // Pre-mark already-raised PRs (duplicate guard UX layer)
       ]);
       const locs = locRes.data.data || [];
       setLocations(locs);
       setVendors(venRes.data.data || []);
+
+      // Pre-populate raisedPrs from any existing PENDING Bills so both SM and COO
+      // immediately see 'PR RAISED' on items already ordered by either role.
+      const existingBills = billsRes.data.data || [];
+      const preRaised: Record<string, boolean> = {};
+      existingBills.forEach((bill: any) => {
+        if (bill.deliveryStatus === 'PENDING') {
+          (bill.items || []).forEach((i: any) => {
+            const key = `${i.item}-${bill.destinationLocation}`;
+            if (key !== 'undefined-undefined') preRaised[key] = true;
+          });
+        }
+      });
+      setRaisedPrs(preRaised);
       
       if (isStore && locs.length > 0 && selectedLocation === 'ALL') {
         setSelectedLocation(locs[0]._id);
@@ -296,7 +310,7 @@ const FoodRequestPage: React.FC = () => {
       <header className="page-header">
         <div className="header-title">
           <h1>{isStore ? 'STOCK REQUESTS' : 'FOOD REQUESTS'}</h1>
-          <p className="subtitle">{isStore ? 'GAP ANALYSIS & PR GENERATION' : 'REQUESTS FROM CENTERS — STOCK VERIFICATION & APPROVAL'}</p>
+          <p className="subtitle">{isStore ? 'GAP ANALYSIS & PR GENERATION' : 'REQUESTS FROM CENTERS â€” STOCK VERIFICATION & APPROVAL'}</p>
         </div>
         <div className="header-actions">
 
@@ -308,23 +322,7 @@ const FoodRequestPage: React.FC = () => {
 
       {error && <div className="error-message">{error}</div>}
 
-      {/* Tabs for Store/Admin */}
-      {isStore && !isCenter && (
-        <div className="workflow-tabs">
-          <button
-            className={`tab-item ${activeTab === 'CONSOLIDATED' ? 'active' : ''}`}
-            onClick={() => setActiveTab('CONSOLIDATED')}
-          >
-            <Package size={16} /> CONSOLIDATED DEMAND
-          </button>
-          <button
-            className={`tab-item ${activeTab === 'INDIVIDUAL' ? 'active' : ''}`}
-            onClick={() => setActiveTab('INDIVIDUAL')}
-          >
-            <Clock size={16} /> CENTER REQUESTS ({pending.length})
-          </button>
-        </div>
-      )}
+      {/* Stock Requests always shows Consolidated Demand â€” CENTER REQUESTS tab removed */}
 
       {/* Summary strip */}
       <div className="fr-summary">
@@ -341,7 +339,7 @@ const FoodRequestPage: React.FC = () => {
 
       {isLoading ? <ForgeLoader /> : (
         <div className="fr-content">
-          {activeTab === 'CONSOLIDATED' && !isCenter ? (
+          {!isCenter ? (
             /* ==================== CONSOLIDATED VIEW ==================== */
             <div className="consolidated-panel">
               <div className="consolidated-header">
@@ -487,232 +485,165 @@ const FoodRequestPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            /* ==================== INDIVIDUAL REQUESTS VIEW ==================== */
+            /* ==================== CENTER VIEW: My Submitted Requests ==================== */
             <div className="fr-list">
-              {requests.length === 0 && (
+              {requests.length === 0 ? (
                 <div className="empty-state">
-                  No food requests yet.
-                  <button className="btn-seed inline-seed" onClick={handleSeedSample} disabled={seeding}>
-                    {seeding ? 'Creating...' : '+ Create Sample Requests'}
-                  </button>
+                  <Package size={40} style={{ opacity: 0.3 }} />
+                  <span>No requests submitted yet.</span>
                 </div>
-              )}
+              ) : (
+                requests.map((req: any) => {
+                  const isExpanded = expandedId === req._id;
+                  const isProcessing = processingId === req._id;
+                  const isReceiving = receivingId === req._id;
 
-              {/* Grouped by Center */}
-              {Object.entries(
-                requests.reduce((acc: any, req) => {
-                  const name = req.centerName || 'Unknown Center';
-                  if (!acc[name]) acc[name] = [];
-                  acc[name].push(req);
-                  return acc;
-                }, {})
-              ).map(([centerName, centerRequests]: [string, any]) => (
-                <div key={centerName} className="center-group">
-                  <div className="center-group-header">
-                    <div className="center-dot" />
-                    <h2>{centerName.toUpperCase()}</h2>
-                    <span className="center-req-count">{centerRequests.length} REQUESTS</span>
-                  </div>
-
-                  <div className="center-group-content">
-                    {centerRequests.map((req: any) => {
-                      const isExpanded = expandedId === req._id;
-                      const isProcessing = processingId === req._id;
-                      const isRejecting = rejectingId === req._id;
-
-                      return (
-                        <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>
-                          {/* Card Header */}
-                          <div className="fr-card-header" onClick={() => setExpandedId(isExpanded ? null : req._id)}>
-                            <div className="fr-card-left">
-                              <div className={`fr-status-tag ${STATUS_COLORS[req.status]}`}>
-                                {renderStatusIcon(req.status)}
-                                {req.status}
-                              </div>
-                              <div className="fr-center-info">
-                                <span className="fr-meta">
-                                  <strong className="item-count-badge">{req.requestedItems.length} ITEMS TOTAL</strong> ·
-                                  REQ: {new Date(req.createdAt).toLocaleDateString()} ·
-                                  <strong style={{ color: 'var(--primary)' }}>
-                                    DELIVERY: {req.deliveryDate ? new Date(req.deliveryDate).toLocaleDateString() : 'TBD'}
-                                  </strong>
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="fr-card-right">
-                              {/* Store Actions */}
-                              {(req.status === 'PENDING' || req.status === 'PARTIAL') && !isCenter && (
-                                <div className="fr-action-row" onClick={e => e.stopPropagation()}>
-                                  <button className="btn-approve" onClick={() => handleApprove(req._id)} disabled={isProcessing}>
-                                    {isProcessing ? <Loader2 size={13} className="spin" /> : (req.status === 'PARTIAL' ? <RefreshCw size={13} /> : <CheckCircle size={13} />)}
-                                    {req.status === 'PARTIAL' ? 'RE-CHECK STOCK' : 'APPROVE'}
-                                  </button>
-                                  {req.status === 'PENDING' && (
-                                    <button className="btn-reject" onClick={() => setRejectingId(isRejecting ? null : req._id)} disabled={isProcessing}>
-                                      <XCircle size={13} /> REJECT
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Center Receive Action */}
-                              {(req.status === 'APPROVED' || req.status === 'PARTIAL') && isCenter && (
-                                <div className="fr-action-row" onClick={e => e.stopPropagation()}>
-                                  <button className="btn-receive" onClick={() => {
-                                    setReceivingId(req._id);
-                                    setExpandedId(req._id);
-                                    const qtys: Record<string, number> = {};
-                                    req.requestedItems.forEach((item: any, idx: number) => {
-                                      qtys[`${req._id}-${idx}`] = item.requestedQty;
-                                    });
-                                    setReceivedQtys(prev => ({ ...prev, ...qtys }));
-                                  }} disabled={isProcessing}>
-                                    <Package size={13} /> MARK RECEIVED
-                                  </button>
-                                </div>
-                              )}
-
-                              {req.status === 'APPROVED' && <span className="approved-by">✓ Approved</span>}
-                              {req.status === 'REJECTED' && <span className="rejected-by">✕ {req.rejectionReason || 'Rejected'}</span>}
-                              {req.status === 'PARTIAL' && <span className="partial-note">⚠ Insufficient stock on some items</span>}
-                              {req.status === 'RECEIVED' && <span className="received-by">✓ Items Received &amp; Stock Updated</span>}
-
-                              <button className="expand-btn">
-                                {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                              </button>
-                            </div>
+                  return (
+                    <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>
+                      {/* Card Header */}
+                      <div className="fr-card-header" onClick={() => setExpandedId(isExpanded ? null : req._id)}>
+                        <div className="fr-card-left">
+                          <div className={`fr-status-tag ${STATUS_COLORS[req.status]}`}>
+                            {req.status === 'PENDING' && <Clock size={11} />}
+                            {req.status === 'APPROVED' && <CheckCircle size={11} />}
+                            {req.status === 'PARTIAL' && <AlertTriangle size={11} />}
+                            {req.status === 'REJECTED' && <XCircle size={11} />}
+                            {req.status === 'RECEIVED' && <PackageCheck size={11} />}
+                            {req.status}
                           </div>
-
-                          {/* Reject Form */}
-                          {isRejecting && (
-                            <div className="reject-form" onClick={e => e.stopPropagation()}>
-                              <input type="text" placeholder="Rejection reason (optional)" value={rejectReason} onChange={e => setRejectReason(e.target.value)} className="reject-input" />
-                              <button className="btn-reject-confirm" onClick={() => handleReject(req._id)} disabled={isProcessing}>
-                                {isProcessing ? <Loader2 size={13} className="spin" /> : 'CONFIRM REJECT'}
-                              </button>
-                              <button className="btn-cancel-reject" onClick={() => setRejectingId(null)}>CANCEL</button>
-                            </div>
-                          )}
-
-                          {/* Receive Form */}
-                          {receivingId === req._id && (
-                            <div className="receive-form" onClick={e => e.stopPropagation()}>
-                              <div className="receive-header">
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#8b5cf6' }}>
-                                  <Package size={14} />
-                                  <span style={{ fontWeight: 800, fontSize: '0.75rem' }}>CONFIRM RECEIVED QUANTITIES</span>
-                                </div>
-                                <p style={{ fontSize: '0.65rem', color: 'var(--text-dim)', margin: '4px 0 0 22px' }}>
-                                  Adjust counts if they don't match requested values. Pricing will auto-adjust.
-                                </p>
-                              </div>
-                              <div className="receive-actions">
-                                <button className="btn-receive-confirm" onClick={() => handleReceive(req._id)} disabled={isProcessing}>
-                                  {isProcessing ? <Loader2 size={13} className="spin" /> : 'CONFIRM RECEIPT'}
-                                </button>
-                                <button className="btn-cancel-receive" onClick={() => setReceivingId(null)}>CANCEL</button>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Expanded Items */}
-                          {isExpanded && (
-                            <div className="fr-items-panel">
-                              {req.notes && <p className="fr-notes">📝 {req.notes}</p>}
-                              <table className="fr-items-table">
-                                <thead>
-                                  <tr>
-                                    <th>CODE</th>
-                                    <th>ITEM</th>
-                                    <th>{receivingId === req._id ? 'RECEIVED QTY' : 'REQUESTED'}</th>
-                                    {!isCenter && req.status !== 'PENDING' && <th>IN STOCK AT APPROVAL</th>}
-                                    {!isCenter && req.status !== 'PENDING' && <th>SUFFICIENT?</th>}
-                                    {isCenter && req.status !== 'PENDING' && <th>RATE</th>}
-                                    {isCenter && req.status !== 'PENDING' && <th>TOTAL COST</th>}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {req.requestedItems.map((item: any, i: number) => {
-                                    const hasBom = item.isMenuItem && item.bomId && item.bomId.items && item.bomId.items.length > 0;
-                                    return (
-                                      <React.Fragment key={i}>
-                                        <tr className={hasBom ? "has-bom-row" : ""}>
-                                          <td><span className="code-sm">{item.simpleCode || '—'}</span></td>
-                                          <td>
-                                            <strong>{item.materialName.toUpperCase()}</strong>
-                                            {hasBom && <span className="bom-badge">MENU ITEM</span>}
-                                          </td>
-                                          <td>
-                                            {receivingId === req._id ? (
-                                              <div className="receive-input-group">
-                                                <input
-                                                  type="number"
-                                                  value={receivedQtys[`${req._id}-${i}`] ?? item.requestedQty}
-                                                  onChange={(e) => setReceivedQtys({
-                                                    ...receivedQtys,
-                                                    [`${req._id}-${i}`]: Number(e.target.value)
-                                                  })}
-                                                  className="qty-edit-input"
-                                                />
-                                                <span style={{ fontSize: '0.65rem', fontWeight: 800 }}>{item.unit?.toUpperCase()}</span>
-                                              </div>
-                                            ) : (
-                                              <strong>{item.receivedQty !== null && item.receivedQty !== undefined ? item.receivedQty : item.requestedQty} {item.unit?.toUpperCase()}</strong>
-                                            )}
-                                          </td>
-                                          {/* Other columns remain unchanged */}
-                                          {!isCenter && req.status !== 'PENDING' && (
-                                            <td className={item.isStockSufficient === false ? 'td-warn' : ''}>
-                                              {item.availableStock !== null ? `${item.availableStock} ${item.unit?.toUpperCase()}` : '—'}
-                                            </td>
-                                          )}
-                                          {!isCenter && req.status !== 'PENDING' && (
-                                            <td>
-                                              {item.isStockSufficient === true && <span className="suff-yes">✓ YES</span>}
-                                              {item.isStockSufficient === false && <span className="suff-no">✗ NO</span>}
-                                              {item.isStockSufficient === null && <span className="suff-na">—</span>}
-                                            </td>
-                                          )}
-                                          {isCenter && req.status !== 'PENDING' && (
-                                            <>
-                                              <td>
-                                                {item.isStockSufficient === false ? 'REJECTED' : (item.assignedRate !== undefined ? `₹${item.assignedRate}` : '—')}
-                                              </td>
-                                              <td>
-                                                <strong style={{ color: item.isStockSufficient === false ? 'var(--text-dim)' : 'var(--primary)' }}>
-                                                  {item.isStockSufficient === false ? '—' : `₹${(item.assignedRate * (item.receivedQty ?? (receivedQtys[`${req._id}-${i}`] ?? item.requestedQty))).toFixed(2)}`}
-                                                </strong>
-                                              </td>
-                                            </>
-                                          )}
-                                        </tr>
-
-                                        {/* BOM Ingredients */}
-                                        {!isCenter && hasBom && item.bomId.items.map((ing: any, idx: number) => {
-                                          const totalIngQty = Number(ing.quantity) * Number(item.requestedQty);
-                                          return (
-                                            <tr key={`bom-${i}-${idx}`} className="bom-ingredient-row">
-                                              <td></td>
-                                              <td className="bom-ing-name"><span className="ing-arrow">↳</span> {(ing.itemName || ing.materialName || 'Unknown Material').toUpperCase()}</td>
-                                              <td className="bom-ing-qty">{totalIngQty.toFixed(2)} {(ing.unit === 'custom' ? (ing.customUnit || 'unit') : (ing.unit || 'UNIT')).toUpperCase()}</td>
-                                              {req.status !== 'PENDING' && <td colSpan={2}></td>}
-                                            </tr>
-                                          );
-                                        })}
-                                      </React.Fragment>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
-                            </div>
-                          )}
+                          <div className="fr-center-info">
+                            <span className="fr-meta">
+                              <strong className="item-count-badge">{req.requestedItems.length} ITEMS</strong> ·
+                              {new Date(req.createdAt).toLocaleDateString()} ·&nbsp;
+                              <strong style={{ color: 'var(--primary)' }}>
+                                DELIVERY: {req.deliveryDate ? new Date(req.deliveryDate).toLocaleDateString() : 'TBD'}
+                              </strong>
+                            </span>
+                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
+
+                        <div className="fr-card-right">
+                          {/* Receive Action for approved/partial requests */}
+                          {(req.status === 'APPROVED' || req.status === 'PARTIAL') && (
+                            <button
+                              className="btn-receive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const qtys: Record<string, number> = {};
+                                req.requestedItems.forEach((i: any) => { qtys[i.materialName] = i.requestedQty; });
+                                setReceivedQtys(qtys);
+                                setReceivingId(isReceiving ? null : req._id);
+                              }}
+                              disabled={isProcessing}
+                            >
+                              <PackageCheck size={13} /> RECEIVE DELIVERY
+                            </button>
+                          )}
+                          <button className="expand-btn">
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Rejection Reason */}
+                      {req.status === 'REJECTED' && req.rejectionReason && (
+                        <div style={{ padding: '8px 20px', background: 'rgba(239,68,68,0.05)', borderTop: '1px solid var(--border-main)', fontSize: '0.75rem', color: '#ef4444' }}>
+                          <strong>Reason:</strong> {req.rejectionReason}
+                        </div>
+                      )}
+
+                      {/* Receive Form */}
+                      {isReceiving && (
+                        <div className="receive-form">
+                          <div className="receive-header">
+                            <strong style={{ fontSize: '0.75rem' }}>CONFIRM RECEIVED QUANTITIES</strong>
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>Edit qty if delivery was partial</span>
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', margin: '10px 0' }}>
+                            {req.requestedItems.map((item: any) => (
+                              <div key={item.materialName} className="receive-input-group">
+                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{item.materialName}</span>
+                                <input
+                                  className="qty-edit-input"
+                                  type="number"
+                                  value={receivedQtys[item.materialName] ?? item.requestedQty}
+                                  onChange={(e) => setReceivedQtys({ ...receivedQtys, [item.materialName]: Number(e.target.value) })}
+                                />
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{item.unit}</span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="receive-actions">
+                            <button
+                              className="btn-receive-confirm"
+                              disabled={isProcessing}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                setProcessingId(req._id);
+                                try {
+                                  const items = req.requestedItems.map((i: any) => ({
+                                    ...i,
+                                    receivedQty: receivedQtys[i.materialName] ?? i.requestedQty
+                                  }));
+                                  await foodRequestApi.receive(req._id, items);
+                                  setToast({ message: 'Delivery confirmed!', type: 'success' });
+                                  setReceivingId(null);
+                                  fetchRequests();
+                                } catch (err: any) {
+                                  setToast({ message: err.response?.data?.error || 'Failed to confirm receipt', type: 'error' });
+                                } finally {
+                                  setProcessingId(null);
+                                }
+                              }}
+                            >
+                              {isProcessing ? <Loader2 size={13} className="spin" /> : <PackageCheck size={13} />}
+                              CONFIRM RECEIPT
+                            </button>
+                            <button className="btn-cancel-receive" onClick={(e) => { e.stopPropagation(); setReceivingId(null); }}>
+                              CANCEL
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Expanded Items Panel */}
+                      {isExpanded && (
+                        <div className="fr-items-panel">
+                          {req.notes && <p className="fr-notes">📝 {req.notes}</p>}
+                          <table className="fr-items-table">
+                            <thead>
+                              <tr>
+                                <th>ITEM</th>
+                                <th>CODE</th>
+                                <th>REQUESTED</th>
+                                <th>UNIT</th>
+                                <th>RECEIVED</th>
+                                <th>STATUS</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {req.requestedItems.map((item: any, i: number) => (
+                                <tr key={i}>
+                                  <td><strong>{item.materialName}</strong></td>
+                                  <td><span className="code-sm">{item.simpleCode || '—'}</span></td>
+                                  <td>{item.requestedQty}</td>
+                                  <td>{item.unit}</td>
+                                  <td>{item.receivedQty ?? '—'}</td>
+                                  <td>
+                                    {item.approvalStatus === 'APPROVED' && <span className="suff-yes">✓ APPROVED</span>}
+                                    {item.approvalStatus === 'REJECTED' && <span className="suff-no">✗ REJECTED</span>}
+                                    {item.approvalStatus === 'PENDING' && <span className="suff-na">PENDING</span>}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
         </div>
