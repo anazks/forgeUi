@@ -14,7 +14,7 @@ const InventoryPage: React.FC = () => {
 
   const [inventory, setInventory] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
+  const [selectedLocation, setSelectedLocation] = useState<string>(isStore ? 'ALL' : '');
   const [isLoading, setIsLoading] = useState(true);
   
   // Editing state
