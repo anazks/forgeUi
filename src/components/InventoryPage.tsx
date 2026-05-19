@@ -10,7 +10,7 @@ const InventoryPage: React.FC = () => {
   
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
-  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
+  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
 
   const [inventory, setInventory] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);

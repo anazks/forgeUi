@@ -94,10 +94,16 @@ export const foodRequestApi = {
     return api.get(url);
   },
   seedSample: (data?: any) => api.post('/foodrequests/seed-sample', data || {}),
-  approve: (id: string) => api.put(`/foodrequests/${id}/approve`, {}),
+  // COO: edit a single item's qty
+  updateItemQty: (requestId: string, itemId: string, qty: number) =>
+    api.put(`/foodrequests/${requestId}/items`, { itemId, requestedQty: qty }),
+  // COO: approve or reject selected items
+  approveItems: (requestId: string, itemIds: string[], action: 'APPROVED' | 'REJECTED') =>
+    api.put(`/foodrequests/${requestId}/approve`, { itemIds, action }),
   reject: (id: string, reason: string) => api.put(`/foodrequests/${id}/reject`, { reason }),
   receive: (id: string, items: any[]) => api.put(`/foodrequests/${id}/receive`, { items }),
 };
+
 export const vendorApi = {
   getAll: (entityId?: string) => api.get(`/vendors${entityId ? `?entity=${entityId}` : ''}`),
   getOne: (id: string) => api.get(`/vendors/${id}`),

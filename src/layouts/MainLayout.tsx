@@ -173,8 +173,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <UtensilsCrossed size={18} /><span>Stock Requests</span>
                   <span className="nav-notification-dot"></span>
                 </button>
+                <button className={`nav-item ${location.pathname === '/food-requests' ? 'active' : ''}`} onClick={() => navigate('/food-requests')}>
+                  <Package size={18} /><span>Food Requests</span>
+                  <span className="nav-notification-dot"></span>
+                </button>
                 <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
-                  <Package size={18} /><span>Inventory</span>
+                  <ShoppingBag size={18} /><span>Inventory</span>
                 </button>
                 <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
                   <ShoppingBag size={18} /><span>New Purchase</span>
