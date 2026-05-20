@@ -9,8 +9,10 @@ import BomPage from './components/BomPage';
 import ItemConfigPage from './components/ItemConfigPage';
 import StoreDashboard from './components/StoreDashboard';
 import FoodRequestPage from './components/FoodRequestPage';
+import StockRequestsPage from './components/StockRequestsPage';
 import MasterDatabasePage from './components/MasterDatabasePage';
 import PurchasePage from './components/PurchasePage';
+import ProductionPage from './components/ProductionPage';
 import PaymentSettings from './components/PaymentSettings';
 import WastagePage from './components/WastagePage';
 import CentersDashboardPage from './components/CentersDashboardPage';
@@ -26,7 +28,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/store-dashboard" element={<StoreDashboard />} />
-        <Route path="/store-requests" element={<FoodRequestPage />} />
+        <Route path="/store-requests" element={<StockRequestsPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/menu" element={<MenuPage />} />
         <Route path="/bom" element={<BomPage />} />
@@ -58,6 +60,8 @@ function App() {
         <Route path="/entity/:entityId/inventory" element={<InventoryPage />} />
         <Route path="/purchase" element={<PurchasePage />} />
         <Route path="/entity/:entityId/purchase" element={<PurchasePage />} />
+        <Route path="/production" element={<ProductionPage />} />
+        <Route path="/entity/:entityId/production" element={<ProductionPage />} />
         <Route path="/payment-settings" element={<PaymentSettings />} />
         <Route path="/entity/:entityId/payment-settings" element={<PaymentSettings />} />
         <Route path="/finance" element={<FinancePage />} />

@@ -93,7 +93,7 @@ export const foodRequestApi = {
     if (date) url += `date=${date}&`;
     return api.get(url);
   },
-  seedSample: (data?: any) => api.post('/foodrequests/seed-sample', data || {}),
+
   // COO: edit a single item's qty
   updateItemQty: (requestId: string, itemId: string, qty: number) =>
     api.put(`/foodrequests/${requestId}/items`, { itemId, requestedQty: qty }),
@@ -139,6 +139,18 @@ export const expenseApi = {
   getAll: (entityId?: string) => api.get(`/expense-categories${entityId ? `?entity=${entityId}` : ''}`),
   create: (data: any) => api.post('/expense-categories', data),
   delete: (id: string) => api.delete(`/expense-categories/${id}`),
+};
+
+export const productionApi = {
+  getOrders: (type: 'send' | 'receive', locationId?: string) => {
+    let url = `/production/orders?type=${type}`;
+    if (locationId) url += `&locationId=${locationId}`;
+    return api.get(url);
+  },
+  dispatch: (id: string, itemsToDispatch: { itemId: string; dispatchQty: number }[]) => 
+    api.post(`/production/orders/${id}/dispatch`, { itemsToDispatch }),
+  receive: (id: string, itemsToReceive: { itemId: string; receiveQty: number }[]) => 
+    api.post(`/production/orders/${id}/receive`, { itemsToReceive }),
 };
 
 export const purchaseApi = {

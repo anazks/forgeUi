@@ -180,6 +180,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
                   <ShoppingBag size={18} /><span>Inventory</span>
                 </button>
+                <button className={`nav-item ${location.pathname === '/production' ? 'active' : ''}`} onClick={() => navigate('/production')}>
+                  <ChefHat size={18} /><span>Production</span>
+                </button>
                 <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
                   <ShoppingBag size={18} /><span>New Purchase</span>
                 </button>
@@ -238,6 +241,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
                     <Package size={18} /><span>Inventory</span>
                   </button>
+                  <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production', 'production')}>
+                    <ChefHat size={18} /><span>Production</span>
+                  </button>
                   <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
                     <ShoppingBag size={18} /><span>Purchases</span>
                   </button>
@@ -267,6 +273,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   </button>
                   <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
                     <Package size={18} /><span>Inventory</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production', 'production')}>
+                    <ChefHat size={18} /><span>Production</span>
                   </button>
                   <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
                     <ShoppingBag size={18} /><span>Purchase</span>

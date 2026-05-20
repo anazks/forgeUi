@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { foodRequestApi, userApi, vendorApi, purchaseApi } from '../services/api';
+import { foodRequestApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
   Plus, RefreshCw, CheckCircle, XCircle, Clock,
-  AlertTriangle, ChevronDown, ChevronUp, Loader2, Beaker,
-  Package, PackageCheck, Edit3
+  AlertTriangle, ChevronDown, ChevronUp, Loader2,
+  Package, Edit3, PackageCheck, Save
 } from 'lucide-react';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -46,33 +46,15 @@ const FoodRequestPage: React.FC = () => {
   ];
 
   const [requests, setRequests] = useState<any[]>(mockRequests);
+  const [locations, setLocations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [seeding, setSeeding] = useState(false);
+
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [demandSummary, setDemandSummary] = useState<{ totalOpenDemands: number, items: any[] }>({ totalOpenDemands: 0, items: [] });
-  const [locations, setLocations] = useState<any[]>([]);
-  const [vendors, setVendors] = useState<any[]>([]);
-  const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
-
-  // Bulk PR State
-  const [selectedForPr, setSelectedForPr] = useState<Record<string, boolean>>({});
-  const [vendorForPr, setVendorForPr] = useState<Record<string, string>>({});
-  const [orderQuantities, setOrderQuantities] = useState<Record<string, number>>({});
-  const [raisedPrs, setRaisedPrs] = useState<Record<string, boolean>>({});
-  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
-
-  const [summaryDate, setSummaryDate] = useState(() => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return tomorrow.toISOString().split('T')[0];
-  });
-  const [receivingId, setReceivingId] = useState<string | null>(null);
-  const [receivedQtys, setReceivedQtys] = useState<Record<string, number>>({});
 
   // COO Food Request approval state
   const [cooSelectedItems, setCooSelectedItems] = useState<Record<string, boolean>>({});
@@ -80,6 +62,8 @@ const FoodRequestPage: React.FC = () => {
   const [cooSavingKey, setCooSavingKey] = useState<string | null>(null);
   const [cooApproving, setCooApproving] = useState(false);
   const [cooLocFilter, setCooLocFilter] = useState<string>('ALL');
+  const [cooActiveTab, setCooActiveTab] = useState<'OPEN' | 'APPROVED'>('OPEN');
+  const [cooExpandedGroups, setCooExpandedGroups] = useState<Record<string, boolean>>({});
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -93,128 +77,6 @@ const FoodRequestPage: React.FC = () => {
     fetchRequests();
   }, [entityId]);
 
-  useEffect(() => {
-    if (!isCenter) {
-      fetchDemand();
-      fetchLocationsAndVendors();
-    }
-  }, [entityId, summaryDate]);
-
-  const fetchLocationsAndVendors = async () => {
-    try {
-      const [locRes, venRes, billsRes] = await Promise.all([
-        userApi.getLocations(entityId),
-        vendorApi.getAll(),
-        purchaseApi.getBills()  // Pre-mark already-raised PRs (duplicate guard UX layer)
-      ]);
-      const locs = locRes.data.data || [];
-      setLocations(locs);
-      setVendors(venRes.data.data || []);
-
-      // Pre-populate raisedPrs from any existing PENDING Bills so both SM and COO
-      // immediately see 'PR RAISED' on items already ordered by either role.
-      const existingBills = billsRes.data.data || [];
-      const preRaised: Record<string, boolean> = {};
-      existingBills.forEach((bill: any) => {
-        if (bill.deliveryStatus === 'PENDING') {
-          (bill.items || []).forEach((i: any) => {
-            const key = `${i.item}-${bill.destinationLocation}`;
-            if (key !== 'undefined-undefined') preRaised[key] = true;
-          });
-        }
-      });
-      setRaisedPrs(preRaised);
-      
-      if (isStore && locs.length > 0 && selectedLocation === 'ALL') {
-        setSelectedLocation(locs[0]._id);
-      }
-    } catch (err) {
-      console.error('Failed to load locations/vendors', err);
-    }
-  };
-
-  const fetchDemand = async () => {
-    try {
-      const res = await foodRequestApi.getDemandSummary(entityId, summaryDate);
-      const data = res.data.data || { totalOpenDemands: 0, items: [] };
-      setDemandSummary(data);
-
-      // Auto-initialize order quantities with approvedGap (new default)
-      const initialQtys: Record<string, number> = {};
-      data.items.forEach((item: any) => {
-        if (item.type === 'MATERIAL' && item.approvedGap > 0) {
-          initialQtys[`${item.materialId}-${item.locationId}`] = item.approvedGap;
-        }
-      });
-      setOrderQuantities(initialQtys);
-    } catch (err) {
-      console.error('Failed to fetch demand summary:', err);
-    }
-  };
-
-  const handleBulkRaisePR = async () => {
-    // Collect all checked items
-    const selectedItems = demandSummary.items.filter(
-      (item: any) => item.type === 'MATERIAL' && item.approvedGap > 0 && selectedForPr[`${item.materialId}-${item.locationId}`] && !raisedPrs[`${item.materialId}-${item.locationId}`]
-    );
-
-    if (selectedItems.length === 0) {
-      showToast('No items selected for PR', 'warn');
-      return;
-    }
-
-    // Validate vendors are selected
-    const missingVendor = selectedItems.find(i => !vendorForPr[`${i.materialId}-${i.locationId}`]);
-    if (missingVendor) {
-      showToast(`Please select a vendor for ${missingVendor.name}`, 'error');
-      return;
-    }
-
-    try {
-      setIsBulkProcessing(true);
-      
-      // Group by Vendor and Location
-      const groupedByVendorAndLoc: Record<string, any[]> = {};
-      selectedItems.forEach(item => {
-        const vId = vendorForPr[`${item.materialId}-${item.locationId}`];
-        const lId = item.locationId;
-        const key = `${vId}_${lId}`;
-        if (!groupedByVendorAndLoc[key]) groupedByVendorAndLoc[key] = { vendorId: vId, locationId: lId, items: [] };
-        groupedByVendorAndLoc[key].items.push(item);
-      });
-
-      // Submit each PR
-      await Promise.all(Object.values(groupedByVendorAndLoc).map(group => {
-        return purchaseApi.createRequest({
-          vendorId: group.vendorId,
-          destinationLocation: group.locationId,
-          items: group.items.map((i: any) => ({
-            item: i.materialId,
-            itemName: i.name,
-            requestedQty: orderQuantities[`${i.materialId}-${i.locationId}`] !== undefined
-              ? orderQuantities[`${i.materialId}-${i.locationId}`]
-              : i.approvedGap,
-            unit: i.unit
-          }))
-        });
-      }));
-
-      // Mark as raised
-      const newRaised = { ...raisedPrs };
-      selectedItems.forEach(item => {
-        newRaised[`${item.materialId}-${item.locationId}`] = true;
-      });
-      setRaisedPrs(newRaised);
-      setSelectedForPr({});
-      
-      showToast('Purchase Requests generated successfully!', 'success');
-    } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to create PRs', 'error');
-    } finally {
-      setIsBulkProcessing(false);
-    }
-  };
-
   const showToast = (message: string, type: 'success' | 'warn' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -223,9 +85,12 @@ const FoodRequestPage: React.FC = () => {
   const fetchRequests = async () => {
     try {
       setIsLoading(true);
-      const res = await foodRequestApi.getAll(entityId);
-      const data = res.data.data || [];
-      setRequests(data);
+      const [reqRes, locRes] = await Promise.all([
+        foodRequestApi.getAll(entityId),
+        userApi.getLocations(entityId)
+      ]);
+      setRequests(reqRes.data.data || []);
+      setLocations(locRes.data.data || []);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load requests');
     } finally {
@@ -233,18 +98,7 @@ const FoodRequestPage: React.FC = () => {
     }
   };
 
-  const handleSeedSample = async () => {
-    try {
-      setSeeding(true);
-      await foodRequestApi.seedSample(entityId ? { entity: entityId } : {});
-      showToast('3 sample requests created!', 'success');
-      fetchRequests();
-    } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to seed. Add raw materials first.', 'error');
-    } finally {
-      setSeeding(false);
-    }
-  };
+
 
   const handleApprove = async (id: string) => {
     try {
@@ -253,7 +107,6 @@ const FoodRequestPage: React.FC = () => {
       const { stockStatus, message } = res.data;
       showToast(message, stockStatus === 'ALL_AVAILABLE' ? 'success' : 'warn');
       fetchRequests();
-      fetchDemand();
     } catch (err: any) {
       showToast(err.response?.data?.error || 'Approval failed', 'error');
     } finally {
@@ -269,7 +122,6 @@ const FoodRequestPage: React.FC = () => {
       setRejectingId(null);
       setRejectReason('');
       fetchRequests();
-      fetchDemand();
     } catch (err: any) {
       showToast(err.response?.data?.error || 'Failed to reject', 'error');
     } finally {
@@ -303,8 +155,15 @@ const FoodRequestPage: React.FC = () => {
   const partial = requests.filter(r => r.status === 'PARTIAL');
   const rejected = requests.filter(r => r.status === 'REJECTED');
 
-  // Flattens all actionable requests into per-item rows for COO approval table.
-  // Includes PENDING and PARTIAL requests (second-pass for partially acted requests).
+  const openByLocation = requests
+    .filter(r => r.status === 'PENDING')
+    .reduce((acc: Record<string, number>, r) => {
+      if (r.centerName) {
+        acc[r.centerName] = (acc[r.centerName] || 0) + 1;
+      }
+      return acc;
+    }, {});
+
   const getCooRows = (): any[] => {
     const rows: any[] = [];
     requests
@@ -312,6 +171,10 @@ const FoodRequestPage: React.FC = () => {
       .filter(r => cooLocFilter === 'ALL' || r.centerName === cooLocFilter)
       .forEach(req => {
         req.requestedItems.forEach((item: any) => {
+          const status = item.approvalStatus || 'PENDING';
+          if (status === 'APPROVED' || status === 'REJECTED') {
+            return;
+          }
           rows.push({
             requestId: req._id,
             itemId: item._id,
@@ -320,11 +183,63 @@ const FoodRequestPage: React.FC = () => {
             isMenuItem: item.isMenuItem,
             requestedQty: item.requestedQty,
             unit: item.unit,
-            approvalStatus: item.approvalStatus || 'PENDING',
+            approvalStatus: status,
           });
         });
       });
     return rows;
+  };
+
+  const getCooApprovedGroupedRows = (): any[] => {
+    const groups: Record<string, { dateStr: string; centerName: string; key: string; items: any[] }> = {};
+
+    requests.forEach(req => {
+      if (cooLocFilter !== 'ALL' && req.centerName !== cooLocFilter) {
+        return;
+      }
+
+      req.requestedItems.forEach((item: any) => {
+        const status = item.approvalStatus || 'PENDING';
+        if (status !== 'APPROVED' && status !== 'REJECTED') {
+          return;
+        }
+
+        const rawDate = req.deliveryDate || req.createdAt;
+        const dateStr = rawDate ? new Date(rawDate).toLocaleDateString() : 'N/A';
+        const centerName = req.centerName;
+        const groupKey = `${dateStr}_${centerName}`;
+
+        if (!groups[groupKey]) {
+          groups[groupKey] = {
+            dateStr,
+            centerName,
+            key: groupKey,
+            items: []
+          };
+        }
+
+        groups[groupKey].items.push({
+          requestId: req._id,
+          itemId: item._id,
+          materialName: item.materialName,
+          isMenuItem: item.isMenuItem,
+          requestedQty: item.requestedQty,
+          unit: item.unit,
+          approvalStatus: status,
+          receivedQty: item.receivedQty || 0,
+          simpleCode: item.simpleCode || 'N/A'
+        });
+      });
+    });
+
+    return Object.values(groups);
+  };
+
+  const toggleGroupExpand = (key: string) => {
+    setCooExpandedGroups(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
   };
 
   // Groups selected COO items by requestId and fires one API call per request.
@@ -350,7 +265,6 @@ const FoodRequestPage: React.FC = () => {
       showToast(`${selected.length} item(s) ${action.toLowerCase()}`, action === 'APPROVED' ? 'success' : 'warn');
       setCooSelectedItems({});
       fetchRequests();
-      fetchDemand();
     } catch (err: any) {
       showToast(err.response?.data?.error || 'Action failed', 'error');
     } finally {
@@ -392,7 +306,32 @@ const FoodRequestPage: React.FC = () => {
 
       {/* Summary strip */}
       <div className="fr-summary">
-        <div className="fr-stat pending"><Clock size={14} /><span>{pending.length}</span><label>PENDING</label></div>
+        <div className="fr-stat pending" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Clock size={14} />
+            <label style={{ margin: 0 }}>PENDING</label>
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '2px' }}>
+            {Object.keys(openByLocation).length === 0 ? (
+              <span style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-dim)' }}>0</span>
+            ) : (
+              Object.entries(openByLocation).map(([locName, count]) => (
+                <span key={locName} style={{ 
+                  fontSize: '0.65rem', 
+                  fontWeight: 900, 
+                  background: 'rgba(245, 158, 11, 0.1)', 
+                  border: '1px solid rgba(245, 158, 11, 0.25)', 
+                  color: '#f59e0b', 
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase'
+                }}>
+                  {locName}: {count}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
         <div className="fr-divider" />
         <div className="fr-stat approved"><CheckCircle size={14} /><span>{approved.length}</span><label>APPROVED</label></div>
         <div className="fr-divider" />
@@ -411,10 +350,40 @@ const FoodRequestPage: React.FC = () => {
               {/* ====== COO SECTION A: Food Request Approval Table ====== */}
               {isCOO && (
                 <div className="coo-approval-panel">
+                  {/* Tabs header */}
+                  <div className="coo-tabs" style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid var(--border-main)' }}>
+                    <button 
+                      onClick={() => setCooActiveTab('OPEN')}
+                      style={{
+                        background: 'none', border: 'none', padding: '10px 16px', cursor: 'pointer',
+                        color: cooActiveTab === 'OPEN' ? 'var(--primary)' : 'var(--text-dim)',
+                        borderBottom: cooActiveTab === 'OPEN' ? '2px solid var(--primary)' : 'none',
+                        fontWeight: 800, fontSize: '0.85rem', outline: 'none'
+                      }}
+                    >
+                      OPEN REQUESTS
+                    </button>
+                    <button 
+                      onClick={() => setCooActiveTab('APPROVED')}
+                      style={{
+                        background: 'none', border: 'none', padding: '10px 16px', cursor: 'pointer',
+                        color: cooActiveTab === 'APPROVED' ? 'var(--primary)' : 'var(--text-dim)',
+                        borderBottom: cooActiveTab === 'APPROVED' ? '2px solid var(--primary)' : 'none',
+                        fontWeight: 800, fontSize: '0.85rem', outline: 'none'
+                      }}
+                    >
+                      APPROVED REQUESTS
+                    </button>
+                  </div>
+
                   <div className="coo-approval-header">
                     <div>
-                      <div className="info-badge"><Edit3 size={14} /><span>FOOD REQUEST APPROVAL</span></div>
-                      <p className="info-desc">Review, edit quantities, and approve or reject center requests.</p>
+                      <div className="info-badge"><Edit3 size={14} /><span>{cooActiveTab === 'OPEN' ? 'FOOD REQUEST APPROVAL' : 'APPROVED & REJECTED REQUESTS'}</span></div>
+                      <p className="info-desc">
+                        {cooActiveTab === 'OPEN' 
+                          ? 'Review, edit quantities, and approve or reject center requests.' 
+                          : 'View consolidated approved/rejected requests. Edit quantities of approved items if needed.'}
+                      </p>
                     </div>
                     <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
                       <div className="header-date-picker">
@@ -425,266 +394,263 @@ const FoodRequestPage: React.FC = () => {
                           style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontWeight: 800, outline: 'none' }}
                         >
                           <option value="ALL">ALL CENTERS</option>
-                          {requests.map((r: any) => r.centerName).filter((v: string, i: number, a: string[]) => a.indexOf(v) === i).map((name: string) => (
-                            <option key={name} value={name}>{name.toUpperCase()}</option>
-                          ))}
+                          {(() => {
+                            const reqNames = requests.map((r: any) => r.centerName).filter(Boolean);
+                            const locNames = locations
+                              .filter((l: any) => ['KITCHEN', 'CENTERS', 'STORE', 'RESORT', 'AGGREGATE', 'RESTAURANT'].includes(l.role))
+                              .map((l: any) => l.name)
+                              .filter(Boolean);
+                            const allNames = Array.from(new Set([...reqNames, ...locNames])).sort();
+                            return allNames.map((name: string) => (
+                              <option key={name} value={name}>{name.toUpperCase()}</option>
+                            ));
+                          })()}
                         </select>
                       </div>
-                      <button
-                        className="btn-approve"
-                        disabled={cooApproving || Object.keys(cooSelectedItems).filter(k => cooSelectedItems[k]).length === 0}
-                        onClick={async () => {
-                          await handleCooAction('APPROVED');
-                        }}
-                      >
-                        <CheckCircle size={13} /> APPROVE SELECTED
-                      </button>
-                      <button
-                        className="btn-reject"
-                        disabled={cooApproving || Object.keys(cooSelectedItems).filter(k => cooSelectedItems[k]).length === 0}
-                        onClick={async () => {
-                          await handleCooAction('REJECTED');
-                        }}
-                      >
-                        <XCircle size={13} /> REJECT SELECTED
-                      </button>
+                      {cooActiveTab === 'OPEN' && (
+                        <>
+                          <button
+                            className="btn-approve"
+                            disabled={cooApproving || Object.keys(cooSelectedItems).filter(k => cooSelectedItems[k]).length === 0}
+                            onClick={async () => {
+                              await handleCooAction('APPROVED');
+                            }}
+                          >
+                            <CheckCircle size={13} /> APPROVE SELECTED
+                          </button>
+                          <button
+                            className="btn-reject"
+                            disabled={cooApproving || Object.keys(cooSelectedItems).filter(k => cooSelectedItems[k]).length === 0}
+                            onClick={async () => {
+                              await handleCooAction('REJECTED');
+                            }}
+                          >
+                            <XCircle size={13} /> REJECT SELECTED
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
-                  <div className="table-wrapper" style={{ marginTop: '16px' }}>
-                    <table className="sharp-table">
-                      <thead>
-                        <tr>
-                          <th>SL</th>
-                          <th>CENTER</th>
-                          <th>ITEM NAME</th>
-                          <th>TYPE</th>
-                          <th>REQUESTED QTY</th>
-                          <th>EDIT QTY</th>
-                          <th>STATUS</th>
-                          <th style={{ textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              onChange={e => {
-                                const all: Record<string, boolean> = {};
-                                getCooRows().forEach((row: any) => {
-                                  all[`${row.requestId}_${row.itemId}`] = e.target.checked;
-                                });
-                                setCooSelectedItems(all);
-                              }}
-                              style={{ transform: 'scale(1.2)' }}
-                            />
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {getCooRows().length === 0 ? (
-                          <tr><td colSpan={8} className="text-center py-12 text-dim">No pending requests to review.</td></tr>
-                        ) : (
-                          getCooRows().map((row: any, idx: number) => {
-                            const rowKey = `${row.requestId}_${row.itemId}`;
-                            const editQty = cooEditQtys[rowKey] !== undefined ? cooEditQtys[rowKey] : row.requestedQty;
-                            return (
-                              <tr key={rowKey} className={row.approvalStatus === 'REJECTED' ? 'row-rejected' : row.approvalStatus === 'APPROVED' ? 'row-approved' : ''}>
-                                <td>{idx + 1}</td>
-                                <td><strong>{row.centerName}</strong></td>
-                                <td>{row.materialName}</td>
-                                <td><span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{row.isMenuItem ? 'DISH' : 'RAW'}</span></td>
-                                <td>{row.requestedQty} {row.unit}</td>
-                                <td>
-                                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                    <input
-                                      type="number"
-                                      value={editQty}
-                                      min={0}
-                                      onChange={e => setCooEditQtys({ ...cooEditQtys, [rowKey]: Number(e.target.value) })}
-                                      style={{ width: '70px', padding: '5px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
-                                    />
-                                    <button
-                                      className="btn-refresh"
-                                      disabled={cooSavingKey === rowKey || editQty === row.requestedQty}
-                                      onClick={async () => {
-                                        setCooSavingKey(rowKey);
-                                        try {
-                                          await foodRequestApi.updateItemQty(row.requestId, row.itemId, editQty);
-                                          showToast('Quantity updated', 'success');
-                                          fetchRequests();
-                                          fetchDemand();
-                                        } catch { showToast('Failed to update', 'error'); }
-                                        finally { setCooSavingKey(null); }
-                                      }}
-                                      style={{ padding: '5px 10px', fontSize: '0.65rem' }}
-                                    >
-                                      {cooSavingKey === rowKey ? <Loader2 size={11} className="spin" /> : '💾 SAVE'}
-                                    </button>
-                                  </div>
-                                </td>
-                                <td>
-                                  {row.approvalStatus === 'APPROVED' && <span className="suff-yes">✓ APPROVED</span>}
-                                  {row.approvalStatus === 'REJECTED' && <span className="suff-no">✗ REJECTED</span>}
-                                  {row.approvalStatus === 'PENDING' && <span className="suff-na">PENDING</span>}
-                                </td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={cooSelectedItems[rowKey] || false}
-                                    onChange={e => setCooSelectedItems({ ...cooSelectedItems, [rowKey]: e.target.checked })}
-                                    style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  {cooActiveTab === 'OPEN' ? (
+                    <div className="table-wrapper" style={{ marginTop: '16px' }}>
+                      <table className="sharp-table">
+                        <thead>
+                          <tr>
+                            <th>SL</th>
+                            <th>CENTER</th>
+                            <th>ITEM NAME</th>
+                            <th>TYPE</th>
+                            <th>REQUESTED QTY</th>
+                            <th>EDIT QTY</th>
+                            <th>STATUS</th>
+                            <th style={{ textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                onChange={e => {
+                                  const all: Record<string, boolean> = {};
+                                  getCooRows().forEach((row: any) => {
+                                    all[`${row.requestId}_${row.itemId}`] = e.target.checked;
+                                  });
+                                  setCooSelectedItems(all);
+                                }}
+                                style={{ transform: 'scale(1.2)' }}
+                              />
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getCooRows().length === 0 ? (
+                            <tr><td colSpan={8} className="text-center py-12 text-dim">No pending requests to review.</td></tr>
+                          ) : (
+                            getCooRows().map((row: any, idx: number) => {
+                              const rowKey = `${row.requestId}_${row.itemId}`;
+                              const editQty = cooEditQtys[rowKey] !== undefined ? cooEditQtys[rowKey] : row.requestedQty;
+                              return (
+                                <tr key={rowKey} className={row.approvalStatus === 'REJECTED' ? 'row-rejected' : row.approvalStatus === 'APPROVED' ? 'row-approved' : ''}>
+                                  <td>{idx + 1}</td>
+                                  <td><strong>{row.centerName}</strong></td>
+                                  <td>{row.materialName}</td>
+                                  <td><span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{row.isMenuItem ? 'DISH' : 'RAW'}</span></td>
+                                  <td>{row.requestedQty} {row.unit}</td>
+                                  <td>
+                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                      <input
+                                        type="number"
+                                        value={editQty}
+                                        min={0}
+                                        onChange={e => setCooEditQtys({ ...cooEditQtys, [rowKey]: Number(e.target.value) })}
+                                        style={{ width: '70px', padding: '5px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                                      />
+                                      <button
+                                        className="btn-refresh"
+                                        disabled={cooSavingKey === rowKey || editQty === row.requestedQty}
+                                        onClick={async () => {
+                                          setCooSavingKey(rowKey);
+                                          try {
+                                            await foodRequestApi.updateItemQty(row.requestId, row.itemId, editQty);
+                                            showToast('Quantity updated', 'success');
+                                            fetchRequests();
+                                          } catch (err: any) {
+                                            showToast(err.response?.data?.error || 'Update failed', 'error');
+                                          } finally {
+                                            setCooSavingKey(null);
+                                          }
+                                        }}
+                                      >
+                                        {cooSavingKey === rowKey ? <RefreshCw size={12} className="spinning" /> : <Save size={12} />}
+                                      </button>
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <span className={`status-pill status-${row.approvalStatus.toLowerCase()}`}>
+                                      {row.approvalStatus}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    {row.approvalStatus === 'PENDING' && (
+                                      <input
+                                        type="checkbox"
+                                        checked={!!cooSelectedItems[rowKey]}
+                                        onChange={e => setCooSelectedItems({ ...cooSelectedItems, [rowKey]: e.target.checked })}
+                                        style={{ transform: 'scale(1.2)' }}
+                                      />
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="table-wrapper" style={{ marginTop: '16px' }}>
+                      <table className="sharp-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '50px' }}>SL</th>
+                            <th>DATE</th>
+                            <th>CENTER NAME</th>
+                            <th style={{ textAlign: 'center' }}>TOTAL ITEMS</th>
+                            <th>STATUS</th>
+                            <th style={{ textAlign: 'center', width: '120px' }}>ACTION</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {getCooApprovedGroupedRows().length === 0 ? (
+                            <tr><td colSpan={6} className="text-center py-12 text-dim">No processed requests found.</td></tr>
+                          ) : (
+                            getCooApprovedGroupedRows().map((group: any, idx: number) => {
+                              const isExpanded = !!cooExpandedGroups[group.key];
+                              const hasApproved = group.items.some((i: any) => i.approvalStatus === 'APPROVED');
+                              const hasRejected = group.items.some((i: any) => i.approvalStatus === 'REJECTED');
+                              let groupStatus = 'PROCESSED';
+                              if (hasApproved && hasRejected) groupStatus = 'PARTIAL';
+                              else if (hasApproved) groupStatus = 'APPROVED';
+                              else if (hasRejected) groupStatus = 'REJECTED';
+
+                              return (
+                                <React.Fragment key={group.key}>
+                                  <tr>
+                                    <td>{idx + 1}</td>
+                                    <td><strong>{group.dateStr}</strong></td>
+                                    <td><strong>{group.centerName}</strong></td>
+                                    <td style={{ textAlign: 'center' }}>{group.items.length}</td>
+                                    <td>
+                                      <span className={`status-pill status-${groupStatus.toLowerCase()}`}>
+                                        {groupStatus}
+                                      </span>
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button 
+                                        className="btn-refresh" 
+                                        onClick={() => toggleGroupExpand(group.key)}
+                                        style={{ display: 'inline-flex', gap: '4px', padding: '4px 8px', fontSize: '0.7rem' }}
+                                      >
+                                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                        {isExpanded ? 'HIDE DETAILS' : 'VIEW DETAILS'}
+                                      </button>
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr>
+                                      <td colSpan={6} style={{ padding: '16px', background: 'rgba(255,255,255,0.015)', borderTop: '1px solid var(--border-main)' }}>
+                                        <table className="sharp-table" style={{ width: '100%', margin: 0, background: 'var(--bg-main)' }}>
+                                          <thead>
+                                            <tr>
+                                              <th>ITEM NAME</th>
+                                              <th>CODE</th>
+                                              <th>QTY</th>
+                                              <th>EDIT QTY</th>
+                                              <th>STATUS</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {group.items.map((item: any) => {
+                                              const rowKey = `${item.requestId}_${item.itemId}`;
+                                              const editQty = cooEditQtys[rowKey] !== undefined ? cooEditQtys[rowKey] : item.requestedQty;
+                                              return (
+                                                <tr key={rowKey}>
+                                                  <td>{item.materialName}</td>
+                                                  <td><code>{item.simpleCode}</code></td>
+                                                  <td><strong>{item.requestedQty} {item.unit}</strong></td>
+                                                  <td>
+                                                    {item.approvalStatus === 'APPROVED' ? (
+                                                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                                        <input
+                                                          type="number"
+                                                          value={editQty}
+                                                          min={0}
+                                                          onChange={e => setCooEditQtys({ ...cooEditQtys, [rowKey]: Number(e.target.value) })}
+                                                          style={{ width: '70px', padding: '5px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                                                        />
+                                                        <button
+                                                          className="btn-refresh"
+                                                          disabled={cooSavingKey === rowKey || editQty === item.requestedQty}
+                                                          onClick={async () => {
+                                                            setCooSavingKey(rowKey);
+                                                            try {
+                                                              await foodRequestApi.updateItemQty(item.requestId, item.itemId, editQty);
+                                                              showToast('Quantity updated', 'success');
+                                                              fetchRequests();
+                                                            } catch (err: any) {
+                                                              showToast(err.response?.data?.error || 'Update failed', 'error');
+                                                            } finally {
+                                                              setCooSavingKey(null);
+                                                            }
+                                                          }}
+                                                        >
+                                                          {cooSavingKey === rowKey ? <RefreshCw size={12} className="spinning" /> : <Save size={12} />}
+                                                        </button>
+                                                      </div>
+                                                    ) : (
+                                                      <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>N/A (REJECTED)</span>
+                                                    )}
+                                                  </td>
+                                                  <td>
+                                                    <span className={`status-pill status-${item.approvalStatus.toLowerCase()}`}>
+                                                      {item.approvalStatus}
+                                                    </span>
+                                                  </td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
-
-              {/* ====== SECTION B: Consolidated Demand ====== */}
-              <div className="consolidated-header">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
-                  <div>
-                    <div className="info-badge">
-                      <Package size={14} />
-                      <span>TOTAL DEMAND ACROSS ALL PENDING REQUESTS FOR SELECTED DATE</span>
-                    </div>
-                    <p className="info-desc">Consolidated Gap Analysis separated by preparation location.</p>
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <div className="header-date-picker">
-                      <label>LOCATION:</label>
-                      <select 
-                        value={selectedLocation} 
-                        onChange={(e) => setSelectedLocation(e.target.value)}
-                        style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontWeight: 800, outline: 'none' }}
-                      >
-                        {!isStore && <option value="ALL">ALL LOCATIONS</option>}
-                        {locations.map(loc => (
-                          <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="header-date-picker">
-                      <label>DELIVERY DATE:</label>
-                      <input
-                        type="date"
-                        value={summaryDate}
-                        onChange={(e) => setSummaryDate(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Total Open Demands Metric Card */}
-                <div style={{ marginTop: '20px', padding: '16px', background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '12px', borderRadius: '50%', color: '#ef4444' }}>
-                    <AlertTriangle size={24} />
-                  </div>
-                  <div>
-                    <h3 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#ef4444', margin: 0 }}>{demandSummary.totalOpenDemands}</h3>
-                    <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)', margin: 0 }}>ACTIONABLE RAW MATERIAL SHORTAGES (ACROSS ALL LOCATIONS)</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Aggregated Demands */}
-              <div className="consolidated-section">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h3 className="section-title"><Beaker size={14} /> STOCK REQUESTS</h3>
-                  <button 
-                    className="btn-seed" 
-                    onClick={handleBulkRaisePR}
-                    disabled={isBulkProcessing || Object.keys(selectedForPr).length === 0}
-                    style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '8px 16px', fontWeight: 900, cursor: Object.keys(selectedForPr).length === 0 ? 'not-allowed' : 'pointer', borderRadius: '4px', opacity: Object.keys(selectedForPr).length === 0 ? 0.5 : 1 }}
-                  >
-                    {isBulkProcessing ? 'RAISING PRs...' : 'RAISE PR FOR SELECTED'}
-                  </button>
-                </div>
-                
-                <div className="table-wrapper">
-                  <table className="sharp-table">
-                    <thead>
-                      <tr>
-                        <th>SL NO</th>
-                        <th>ITEM NAME (LOCATION)</th>
-                        <th>CURRENT STOCK</th>
-                        <th>REQUESTED STOCK</th>
-                        <th>GAP</th>
-                        <th>ORDER QTY</th>
-                        <th>VENDOR</th>
-                        <th style={{ textAlign: 'center' }}>SELECT</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {demandSummary.items.length === 0 ? (
-                        <tr><td colSpan={7} className="text-center py-12 text-dim">No demands found.</td></tr>
-                      ) : (
-                        demandSummary.items
-                          .filter((item: any) => item.type === 'MATERIAL' && item.displayGap > 0)
-                          .filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation)
-                          .map((item: any, idx: number) => {
-                            const locName = locations.find(l => l._id === item.locationId)?.name || 'Unknown Location';
-                            const itemKey = `${item.materialId}-${item.locationId}`;
-                            const isRaised = raisedPrs[itemKey];
-
-                            return (
-                              <tr key={`item-${idx}`} className={isRaised ? 'row-disabled' : ''}>
-                                <td>{idx + 1}</td>
-                                <td>
-                                  <strong>{item.name.toUpperCase()}</strong>
-                                  <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{locName.toUpperCase()}</div>
-                                </td>
-                                <td>{item.stock.toFixed(2)} {item.unit?.toUpperCase()}</td>
-                                <td>{(item.requestedStock ?? item.demand).toFixed(2)} {item.unit?.toUpperCase()}</td>
-                                <td style={{ color: (item.displayGap ?? item.gap) > 0 ? '#ef4444' : 'inherit', fontWeight: 900 }}>{(item.displayGap ?? item.gap).toFixed(2)} {item.unit?.toUpperCase()}</td>
-                                <td>
-                                   {isRaised ? (
-                                    <span style={{ fontWeight: 900 }}>{orderQuantities[itemKey]} {item.unit?.toUpperCase()}</span>
-                                  ) : (
-                                    <input
-                                      type="number"
-                                      value={orderQuantities[itemKey] ?? item.approvedGap}
-                                      onChange={(e) => setOrderQuantities({...orderQuantities, [itemKey]: Number(e.target.value)})}
-                                      style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
-                                    />
-                                  )}
-                                </td>
-                                <td>
-                                  {isRaised ? (
-                                    <span className="status-pill status-billed">PR RAISED</span>
-                                  ) : (
-                                    <select 
-                                      value={vendorForPr[itemKey] || ''}
-                                      onChange={(e) => setVendorForPr({...vendorForPr, [itemKey]: e.target.value})}
-                                      style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.75rem', width: '100%', outline: 'none' }}
-                                    >
-                                      <option value="">SELECT VENDOR...</option>
-                                      {vendors.map(v => (
-                                        <option key={v._id} value={v._id}>{v.vendorName.toUpperCase()}</option>
-                                      ))}
-                                    </select>
-                                  )}
-                                </td>
-                                <td style={{ textAlign: 'center' }}>
-                                  <input
-                                    type="checkbox"
-                                    checked={selectedForPr[itemKey] || false}
-                                    onChange={(e) => setSelectedForPr({...selectedForPr, [itemKey]: e.target.checked})}
-                                    disabled={isRaised || item.approvedGap === 0}
-                                    title={item.approvedGap === 0 ? 'Awaiting COO approval' : ''}
-                                    style={{ transform: 'scale(1.2)', cursor: (isRaised || item.approvedGap === 0) ? 'not-allowed' : 'pointer', opacity: item.approvedGap === 0 ? 0.3 : 1 }}
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
             </div>
           ) : (
             /* ==================== CENTER VIEW: My Submitted Requests ==================== */
@@ -698,7 +664,6 @@ const FoodRequestPage: React.FC = () => {
                 requests.map((req: any) => {
                   const isExpanded = expandedId === req._id;
                   const isProcessing = processingId === req._id;
-                  const isReceiving = receivingId === req._id;
 
                   return (
                     <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>
@@ -725,22 +690,6 @@ const FoodRequestPage: React.FC = () => {
                         </div>
 
                         <div className="fr-card-right">
-                          {/* Receive Action for approved/partial requests */}
-                          {(req.status === 'APPROVED' || req.status === 'PARTIAL') && (
-                            <button
-                              className="btn-receive"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                const qtys: Record<string, number> = {};
-                                req.requestedItems.forEach((i: any) => { qtys[i.materialName] = i.requestedQty; });
-                                setReceivedQtys(qtys);
-                                setReceivingId(isReceiving ? null : req._id);
-                              }}
-                              disabled={isProcessing}
-                            >
-                              <PackageCheck size={13} /> RECEIVE DELIVERY
-                            </button>
-                          )}
                           <button className="expand-btn">
                             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                           </button>
@@ -751,60 +700,6 @@ const FoodRequestPage: React.FC = () => {
                       {req.status === 'REJECTED' && req.rejectionReason && (
                         <div style={{ padding: '8px 20px', background: 'rgba(239,68,68,0.05)', borderTop: '1px solid var(--border-main)', fontSize: '0.75rem', color: '#ef4444' }}>
                           <strong>Reason:</strong> {req.rejectionReason}
-                        </div>
-                      )}
-
-                      {/* Receive Form */}
-                      {isReceiving && (
-                        <div className="receive-form">
-                          <div className="receive-header">
-                            <strong style={{ fontSize: '0.75rem' }}>CONFIRM RECEIVED QUANTITIES</strong>
-                            <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>Edit qty if delivery was partial</span>
-                          </div>
-                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', margin: '10px 0' }}>
-                            {req.requestedItems.map((item: any) => (
-                              <div key={item.materialName} className="receive-input-group">
-                                <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{item.materialName}</span>
-                                <input
-                                  className="qty-edit-input"
-                                  type="number"
-                                  value={receivedQtys[item.materialName] ?? item.requestedQty}
-                                  onChange={(e) => setReceivedQtys({ ...receivedQtys, [item.materialName]: Number(e.target.value) })}
-                                />
-                                <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>{item.unit}</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="receive-actions">
-                            <button
-                              className="btn-receive-confirm"
-                              disabled={isProcessing}
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                setProcessingId(req._id);
-                                try {
-                                  const items = req.requestedItems.map((i: any) => ({
-                                    ...i,
-                                    receivedQty: receivedQtys[i.materialName] ?? i.requestedQty
-                                  }));
-                                  await foodRequestApi.receive(req._id, items);
-                                  setToast({ message: 'Delivery confirmed!', type: 'success' });
-                                  setReceivingId(null);
-                                  fetchRequests();
-                                } catch (err: any) {
-                                  setToast({ message: err.response?.data?.error || 'Failed to confirm receipt', type: 'error' });
-                                } finally {
-                                  setProcessingId(null);
-                                }
-                              }}
-                            >
-                              {isProcessing ? <Loader2 size={13} className="spin" /> : <PackageCheck size={13} />}
-                              CONFIRM RECEIPT
-                            </button>
-                            <button className="btn-cancel-receive" onClick={(e) => { e.stopPropagation(); setReceivingId(null); }}>
-                              CANCEL
-                            </button>
-                          </div>
                         </div>
                       )}
 
@@ -863,9 +758,7 @@ const FoodRequestPage: React.FC = () => {
         .header-date-picker label { font-size: 0.65rem; font-weight: 800; color: var(--text-dim); letter-spacing: 1px; }
         .header-date-picker input { background: transparent; border: none; color: var(--primary); font-size: 0.85rem; font-weight: 800; outline: none; cursor: pointer; color-scheme: dark; }
 
-        .btn-seed { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #a855f7; padding: 9px 16px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: 0.2s; }
-        .btn-seed:hover:not(:disabled) { background: rgba(168,85,247,0.2); }
-        .btn-seed:disabled { opacity: 0.6; cursor: not-allowed; }
+
         .btn-refresh { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 9px 14px; font-size: 0.7rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 7px; transition: 0.2s; }
         .btn-refresh:hover { border-color: var(--primary); color: var(--primary); }
 
@@ -1031,8 +924,7 @@ const FoodRequestPage: React.FC = () => {
         .suff-na  { color: var(--text-dim); }
 
         .empty-state { padding: 60px; text-align: center; color: var(--text-dim); font-size: 0.9rem; display: flex; flex-direction: column; align-items: center; gap: 16px; }
-        .inline-seed { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); color: #a855f7; padding: 9px 18px; font-size: 0.78rem; font-weight: 800; cursor: pointer; }
-        .inline-seed:disabled { opacity: 0.6; cursor: not-allowed; }
+
 
         /* BOM ingredient rows in requested items table */
         .has-bom-row td { border-bottom: none; padding-bottom: 4px; }
