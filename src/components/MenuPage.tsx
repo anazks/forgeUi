@@ -98,7 +98,7 @@ const MenuPage: React.FC = () => {
   const directItems = menus.map(m => {
     let finalPrice: number | null = null;
     let sellingPrice: number | null = null;
-    if (user?.role === 'CENTERS') {
+    if (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') {
       const customRate = centerRates.find(r => r.menu?._id === m._id && (r.center?._id === user._id || r.center === user._id));
       if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
     }
@@ -109,7 +109,7 @@ const MenuPage: React.FC = () => {
   const bomItems = boms.map(b => {
     let finalPrice: number | null = b.kitchenPrice > 0 ? b.kitchenPrice : null;
     let sellingPrice: number | null = finalPrice;
-    if (user?.role === 'CENTERS') {
+    if (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') {
       const customRate = centerRates.find(r => r.bom?._id === b._id && (r.center?._id === user._id || r.center === user._id));
       if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
     }
@@ -292,10 +292,10 @@ const MenuPage: React.FC = () => {
         <div className="header-title">
           <h1>MENU MANAGEMENT</h1>
           <p className="subtitle">
-            {user?.role === 'CENTERS' ? 'VIEW MENU & REQUEST ITEMS' : 'PRODUCT CATALOG — DIRECT & BOM DISHES'}
+            {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? 'VIEW MENU & REQUEST ITEMS' : 'PRODUCT CATALOG — DIRECT & BOM DISHES'}
           </p>
         </div>
-        {user?.role === 'CENTERS' && (
+        {(user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && (
           <div className="header-date-picker">
             <label>DELIVERY DATE:</label>
             <input
@@ -306,7 +306,7 @@ const MenuPage: React.FC = () => {
             />
           </div>
         )}
-        {user?.role !== 'CENTERS' && (
+        {user?.role !== 'CENTERS' && user?.role !== 'RESTAURANT' && (
           <button className="btn-primary" onClick={openCreateModal}>
             <Plus size={16} /> ADD MENU ITEM
           </button>
@@ -371,7 +371,7 @@ const MenuPage: React.FC = () => {
                 <tr>
                   <th>SOURCE</th>
                   <th style={{ textAlign: 'left' }}>ITEM / DISH NAME</th>
-                  {user?.role === 'CENTERS' ? (
+                  {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
                     <>
                       <th>BUYING RATE (₹)</th>
                       <th>SELLING RATE (₹)</th>
@@ -380,7 +380,7 @@ const MenuPage: React.FC = () => {
                     <th>BASE PRICE (₹)</th>
                   )}
                   <th>UNIT</th>
-                  {user?.role === 'CENTERS' ? (
+                  {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
                     <th style={{ width: '250px' }}>REQUEST QUANTITY</th>
                   ) : (
                     <>
@@ -402,7 +402,7 @@ const MenuPage: React.FC = () => {
                     <td style={{ textAlign: 'left' }}>
                       <strong className="item-name">{item.name?.toUpperCase()}</strong>
                     </td>
-                    {user?.role === 'CENTERS' ? (
+                    {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
                       <>
                         <td className="price-cell buying">
                           {item.displayPrice != null ? `₹ ${item.displayPrice.toFixed(2)}` : '—'}
@@ -426,7 +426,7 @@ const MenuPage: React.FC = () => {
                         {(item.unit === 'custom' ? item.customUnit : item.unit)?.toUpperCase() || '—'}
                       </span>
                     </td>
-                    {user?.role === 'CENTERS' ? (
+                    {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
                       <td>
                         <div className="order-cell">
                           <input

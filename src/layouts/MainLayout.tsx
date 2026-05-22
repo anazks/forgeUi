@@ -74,7 +74,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isPartner = user?.role === 'PARTNER';
   const isCOO = user?.role === 'COO';
   const isResort = user?.role === 'RESORT';
-  const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN';
+  const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN' || user?.role === 'RESTAURANT';
 
   return (
     <div className="dashboard-layout">
@@ -303,6 +303,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   </button>
                   <button className={`nav-item ${isActive('/aggregates', 'aggregates') ? 'active' : ''}`} onClick={() => navTo('/aggregates', 'aggregates')}>
                     <Network size={18} /><span>Aggregate</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/restaurants', 'restaurants') ? 'active' : ''}`} onClick={() => navTo('/restaurants', 'restaurants')}>
+                    <UtensilsCrossed size={18} /><span>Restaurant</span>
                   </button>
                 </>
               )}

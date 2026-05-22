@@ -12,7 +12,6 @@ const StockRequestsPage: React.FC = () => {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
   
   const [demandSummary, setDemandSummary] = useState<{ totalOpenDemands: number, items: any[] }>({ totalOpenDemands: 0, items: [] });
-  const [requests, setRequests] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<string>('ALL');
@@ -74,18 +73,19 @@ const StockRequestsPage: React.FC = () => {
   const fetchDemand = async () => {
     try {
       setIsLoading(true);
-      const [res, reqsRes] = await Promise.all([
-        foodRequestApi.getDemandSummary(entityId, summaryDate),
-        foodRequestApi.getAll(entityId)
-      ]);
+      const res = await foodRequestApi.getDemandSummary(entityId, summaryDate);
       const data = res.data.data || { totalOpenDemands: 0, items: [] };
       setDemandSummary(data);
-      setRequests(reqsRes.data.data || []);
 
       const initialQtys: Record<string, number> = {};
       data.items.forEach((item: any) => {
         if (item.type === 'MATERIAL' && item.approvedGap > 0) {
-          initialQtys[`${item.materialId}-${item.locationId}`] = item.approvedGap;
+          const key = `${item.materialId}-${item.locationId}`;
+          if (item.moq && item.moq > 0) {
+            initialQtys[key] = item.moq * Math.ceil(item.approvedGap / item.moq);
+          } else {
+            initialQtys[key] = item.approvedGap;
+          }
         }
       });
       setOrderQuantities(initialQtys);
@@ -115,7 +115,7 @@ const StockRequestsPage: React.FC = () => {
     try {
       setIsBulkProcessing(true);
       
-      const groupedByVendorAndLoc: Record<string, any[]> = {};
+      const groupedByVendorAndLoc: Record<string, any> = {};
       selectedItems.forEach(item => {
         const vId = vendorForPr[`${item.materialId}-${item.locationId}`];
         const lId = item.locationId;
@@ -161,14 +161,16 @@ const StockRequestsPage: React.FC = () => {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const openByLocation = requests
-    .filter(r => r.status === 'PENDING')
-    .reduce((acc: Record<string, number>, r) => {
-      if (r.centerName) {
-        acc[r.centerName] = (acc[r.centerName] || 0) + 1;
-      }
-      return acc;
-    }, {});
+  const locationsWithShortages = Array.from(
+    new Set(
+      demandSummary.items
+        .filter((item: any) => item.type === 'MATERIAL' && item.approvedGap > 0)
+        .map((item: any) => item.locationId)
+    )
+  ).map(locId => {
+    const loc = locations.find(l => l._id === locId);
+    return loc ? loc.name : 'Unknown Location';
+  }).filter(name => name !== 'Unknown Location');
 
   return (
     <MainLayout>
@@ -242,10 +244,10 @@ const StockRequestsPage: React.FC = () => {
                   <span style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--text-dim)', letterSpacing: '0.5px' }}>OPEN REQUESTS BY LOCATION</span>
                 </div>
                 <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                  {Object.keys(openByLocation).length === 0 ? (
+                  {locationsWithShortages.length === 0 ? (
                     <span style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-dim)' }}>NO OPEN REQUESTS</span>
                   ) : (
-                    Object.entries(openByLocation).map(([locName, count]) => (
+                    locationsWithShortages.map((locName) => (
                       <span key={locName} style={{ 
                         fontSize: '0.65rem', 
                         fontWeight: 900, 
@@ -256,7 +258,7 @@ const StockRequestsPage: React.FC = () => {
                         borderRadius: '4px',
                         textTransform: 'uppercase'
                       }}>
-                        {locName}: {count}
+                        {locName}
                       </span>
                     ))
                   )}

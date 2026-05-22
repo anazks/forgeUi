@@ -33,6 +33,7 @@ export const userApi = {
   getMyStores: (entityId?: string) => api.get(`/users/my-stores${entityId ? `?entity=${entityId}` : ''}`),
   getMyResorts: (entityId?: string) => api.get(`/users/my-resorts${entityId ? `?entity=${entityId}` : ''}`),
   getMyAggregates: (entityId?: string) => api.get(`/users/my-aggregates${entityId ? `?entity=${entityId}` : ''}`),
+  getMyRestaurants: (entityId?: string) => api.get(`/users/my-restaurants${entityId ? `?entity=${entityId}` : ''}`),
   toggleStatus: (userId: string) => api.put(`/users/${userId}/toggle-status`),
   delete: (userId: string) => api.delete(`/users/${userId}`),
   update: (userId: string, data: any) => api.put(`/users/${userId}`, data),

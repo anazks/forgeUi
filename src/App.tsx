@@ -38,6 +38,7 @@ function App() {
         <Route path="/stores" element={<UsersPage roleType="STORE" />} />
         <Route path="/resorts" element={<UsersPage roleType="RESORT" />} />
         <Route path="/aggregates" element={<UsersPage roleType="AGGREGATE" />} />
+        <Route path="/restaurants" element={<UsersPage roleType="RESTAURANT" />} />
 
         {/* Entity specific routes */}
         <Route path="/entity/:entityId" element={<EntityDetail />} />
@@ -49,6 +50,7 @@ function App() {
         <Route path="/entity/:entityId/stores" element={<UsersPage roleType="STORE" />} />
         <Route path="/entity/:entityId/resorts" element={<UsersPage roleType="RESORT" />} />
         <Route path="/entity/:entityId/aggregates" element={<UsersPage roleType="AGGREGATE" />} />
+        <Route path="/entity/:entityId/restaurants" element={<UsersPage roleType="RESTAURANT" />} />
         <Route path="/entity/:entityId/item-config" element={<ItemConfigPage />} />
         <Route path="/food-requests" element={<FoodRequestPage />} />
         <Route path="/entity/:entityId/food-requests" element={<FoodRequestPage />} />

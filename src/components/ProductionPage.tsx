@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Package, ChefHat, Info, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
-import { productionApi, userApi, bomApi } from '../services/api';
+import { productionApi, userApi, bomApi, foodRequestApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 
 const ProductionPage: React.FC = () => {
@@ -39,11 +39,32 @@ const ProductionPage: React.FC = () => {
       }
 
       if (activeTab === 'PRODUCE') {
-        const locId = filterLocation === 'ALL' ? undefined : filterLocation;
-        const res = await productionApi.getOrders('send', locId);
-        const allOrders = res.data.data || [];
-        const activeOrders = allOrders.filter((o: any) => o.status === 'PENDING' || o.status === 'PARTIAL_DISPATCH');
-        setOrders(activeOrders);
+        if (user?.role === 'COO') {
+          const res = await foodRequestApi.getDemandSummary(user?.entity);
+          const rawItems = res.data.data?.items || [];
+          
+          let bomItems = rawItems.filter((i: any) => i.type === 'BOM');
+          if (filterLocation !== 'ALL') {
+            bomItems = bomItems.filter((i: any) => i.locationId === filterLocation);
+          }
+
+          const mappedItems = bomItems.map((i: any) => ({
+            itemName: i.name,
+            bomId: i.materialId,
+            unit: i.unit || 'pcs',
+            totalPendingQty: i.requestedStock, // before approval, requestedStock represents raw demand
+            locationId: i.locationId,
+            isCooView: true
+          }));
+
+          setOrders(mappedItems);
+        } else {
+          const locId = filterLocation === 'ALL' ? undefined : filterLocation;
+          const res = await productionApi.getOrders('send', locId);
+          const allOrders = res.data.data || [];
+          const activeOrders = allOrders.filter((o: any) => o.status === 'PENDING' || o.status === 'PARTIAL_DISPATCH');
+          setOrders(activeOrders);
+        }
       } else {
         const locId = filterLocation === 'ALL' ? undefined : filterLocation;
         const res = await productionApi.getOrders('send', locId);
@@ -122,13 +143,21 @@ const ProductionPage: React.FC = () => {
       <div className="workflow-tabs">
         <button 
           className={`tab-item ${activeTab === 'PRODUCE' ? 'active' : ''}`}
-          onClick={() => setActiveTab('PRODUCE')}
+          onClick={() => {
+            setOrders([]);
+            setIsLoading(true);
+            setActiveTab('PRODUCE');
+          }}
         >
           <ChefHat size={14} /> PRODUCE
         </button>
         <button 
           className={`tab-item ${activeTab === 'SEND' ? 'active' : ''}`}
-          onClick={() => setActiveTab('SEND')}
+          onClick={() => {
+            setOrders([]);
+            setIsLoading(true);
+            setActiveTab('SEND');
+          }}
         >
           <Package size={14} /> SEND
         </button>
@@ -154,16 +183,51 @@ const ProductionPage: React.FC = () => {
         {isLoading ? <ForgeLoader /> : activeTab === 'PRODUCE' ? (
           <div className="produce-grid">
             {(() => {
+              if (user?.role === 'COO') {
+                if (orders.length === 0) {
+                  return <div className="text-center py-12 text-dim" style={{ width: '100%' }}>No items pending production.</div>;
+                }
+
+                return orders.map((item: any, idx: number) => {
+                  const locName = locations.find(l => l._id === item.locationId)?.name || 'Unknown Location';
+                  return (
+                    <div 
+                      key={idx} 
+                      className="produce-card"
+                      onClick={() => setSelectedProduceItem(item)}
+                    >
+                      <div className="produce-card-icon">
+                        <ChefHat size={28} />
+                      </div>
+                      <div className="produce-card-content">
+                        <h3 className="produce-card-title">{(item.itemName || '').toUpperCase()}</h3>
+                        <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '8px' }}>
+                          PREPARATION AT: <span style={{ color: 'var(--text-main)' }}>{(locName || '').toUpperCase()}</span>
+                        </div>
+                        <div className="produce-card-stat">
+                          <span className="stat-label">TOTAL TO PRODUCE</span>
+                          <span className="stat-value">{item.totalPendingQty} {(item.unit || '').toUpperCase()}</span>
+                        </div>
+                        <div className="produce-card-footer">
+                          <Info size={12} /> Click to view raw material recipe
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              }
+
               const consolidatedMap: Record<string, { itemName: string; bomId: string; unit: string; totalPendingQty: number }> = {};
               orders.forEach((order: any) => {
                 (order.items || []).forEach((item: any) => {
                   const pending = item.requestedQty - item.dispatchedQty;
                   if (pending > 0) {
-                    const key = item.bomId || item.itemName;
+                    const bomIdStr = (item.bomId && typeof item.bomId === 'object') ? item.bomId._id : item.bomId;
+                    const key = bomIdStr || item.itemName;
                     if (!consolidatedMap[key]) {
                       consolidatedMap[key] = {
                         itemName: item.itemName,
-                        bomId: item.bomId,
+                        bomId: bomIdStr,
                         unit: item.unit || 'pcs',
                         totalPendingQty: 0
                       };
@@ -188,10 +252,10 @@ const ProductionPage: React.FC = () => {
                     <ChefHat size={28} />
                   </div>
                   <div className="produce-card-content">
-                    <h3 className="produce-card-title">{item.itemName.toUpperCase()}</h3>
+                    <h3 className="produce-card-title">{(item.itemName || '').toUpperCase()}</h3>
                     <div className="produce-card-stat">
                       <span className="stat-label">TOTAL TO PRODUCE</span>
-                      <span className="stat-value">{item.totalPendingQty} {item.unit.toUpperCase()}</span>
+                      <span className="stat-value">{item.totalPendingQty} {(item.unit || '').toUpperCase()}</span>
                     </div>
                     <div className="produce-card-footer">
                       <Info size={12} /> Click to view raw material recipe
@@ -325,21 +389,21 @@ const ProductionPage: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
             <div className="modal-header">
-              <h2>RECIPE BREAKDOWN: {selectedProduceItem.itemName.toUpperCase()}</h2>
+              <h2>RECIPE BREAKDOWN: {(selectedProduceItem?.itemName || '').toUpperCase()}</h2>
               <button className="btn-close" onClick={() => setSelectedProduceItem(null)}>✕</button>
             </div>
             <div className="modal-body">
               <div style={{ marginBottom: '20px', padding: '16px', background: 'rgba(139, 92, 246, 0.05)', border: '1px solid rgba(139, 92, 246, 0.2)', borderRadius: '6px' }}>
                 <span style={{ fontSize: '0.65rem', fontWeight: 900, color: '#8b5cf6', letterSpacing: '0.5px' }}>PRODUCTION VOLUME REQUIRED</span>
                 <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--text-main)', margin: '4px 0 0 0' }}>
-                  {selectedProduceItem.totalPendingQty} {selectedProduceItem.unit.toUpperCase()}
+                  {selectedProduceItem?.totalPendingQty} {(selectedProduceItem?.unit || '').toUpperCase()}
                 </h3>
               </div>
-
+ 
               {matchingBom ? (
                 <div>
                   <p style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 800, marginBottom: '12px' }}>
-                    RAW MATERIALS NEEDED FOR THIS VOLUME (Yield Unit: 1 {matchingBom.unit.toUpperCase()}):
+                    RAW MATERIALS NEEDED FOR THIS VOLUME (Yield Unit: 1 {(matchingBom.unit || '').toUpperCase()}):
                   </p>
                   <table className="mini-table">
                     <thead>

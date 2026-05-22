@@ -15,7 +15,7 @@ import ForgeLoader from './ForgeLoader';
 import { userApi, entityApi } from '../services/api';
 
 interface UsersPageProps {
-  roleType?: 'CENTER' | 'KITCHEN' | 'STORE' | 'RESORT' | 'AGGREGATE';
+  roleType?: 'CENTER' | 'KITCHEN' | 'STORE' | 'RESORT' | 'AGGREGATE' | 'RESTAURANT';
 }
 
 const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
@@ -73,6 +73,8 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
           res = await userApi.getMyResorts(entityId);
         } else if (roleType === 'AGGREGATE') {
           res = await userApi.getMyAggregates(entityId);
+        } else if (roleType === 'RESTAURANT') {
+          res = await userApi.getMyRestaurants(entityId);
         } else {
           res = await userApi.getAll(entityId);
         }
@@ -86,6 +88,8 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
         res = await userApi.getMyResorts();
       } else if (roleType === 'AGGREGATE') {
         res = await userApi.getMyAggregates();
+      } else if (roleType === 'RESTAURANT') {
+        res = await userApi.getMyRestaurants();
       } else if (userData?.entity) {
         const id = userData.entity._id || userData.entity;
         res = await entityApi.getAdmins(id);
@@ -145,7 +149,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
       )}
 
       {/* Admin: Kitchen/Center/etc stats cards */}
-      {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE') && (
+      {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE' || roleType === 'RESTAURANT') && (
         <section className="kitchen-dashboard">
           <div className="stat-card">
             <div className="stat-icon"><DollarSign size={20} /></div>
@@ -190,7 +194,7 @@ const UsersPage: React.FC<UsersPageProps> = ({ roleType }) => {
           </div>
 
           {/* Admin kitchen-card view for specific role types */}
-          {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE') ? (
+          {!isSuperAdmin && (roleType === 'KITCHEN' || roleType === 'CENTER' || roleType === 'STORE' || roleType === 'RESORT' || roleType === 'AGGREGATE' || roleType === 'RESTAURANT') ? (
             <div className="kitchen-cards-container">
               {filtered.map((u) => (
                 <div key={u._id} className="kitchen-card">

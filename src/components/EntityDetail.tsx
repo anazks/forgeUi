@@ -7,7 +7,7 @@ import {
 import { entityApi, userApi, paymentApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
-const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGREGATE', 'PARTNER'];
+const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGREGATE', 'PARTNER', 'RESTAURANT'];
 
 const EntityDetail: React.FC = () => {
   const { entityId: id } = useParams<{ entityId: string }>();
