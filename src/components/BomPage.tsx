@@ -118,7 +118,7 @@ const BomPage: React.FC = () => {
   const [preparationLocation, setPreparationLocation] = useState('');
   const [dishUnit, setDishUnit] = useState('pcs');
   const [dishCustomUnit, setDishCustomUnit] = useState('');
-  const [kitchenPrice, setKitchenPrice] = useState('');
+  const [isSoldB2C, setIsSoldB2C] = useState(true);
   const [items, setItems] = useState<any[]>([{
     materialId: '',
     itemName: '',
@@ -216,7 +216,7 @@ const BomPage: React.FC = () => {
     setPreparationLocation('SELF');
     setDishUnit('pcs');
     setDishCustomUnit('');
-    setKitchenPrice('');
+    setIsSoldB2C(true);
     setItems([{ materialId: '', itemName: '', quantity: '', unit: 'kg', customUnit: '', type: 'Raw Material' }]);
     setError('');
     // Refresh all ingredient sources fresh (silent — no loader)
@@ -230,7 +230,7 @@ const BomPage: React.FC = () => {
     setPreparationLocation(bom.preparationLocation || 'SELF');
     setDishUnit(bom.unit || 'pcs');
     setDishCustomUnit(bom.customUnit || '');
-    setKitchenPrice(bom.kitchenPrice?.toString() || '0');
+    setIsSoldB2C(bom.isSoldB2C !== false);
     setItems(bom.items.map((i: any) => ({
       materialId: i.materialId || '',
       itemName: i.itemName,
@@ -278,7 +278,7 @@ const BomPage: React.FC = () => {
         preparationLocation: preparationLocation === 'SELF' ? null : preparationLocation,
         unit: dishUnit,
         ...(dishUnit === 'custom' && { customUnit: dishCustomUnit }),
-        kitchenPrice: Number(kitchenPrice) || 0,
+        isSoldB2C,
         items: items.map(i => ({
           itemName: i.itemName,
           materialId: i.materialId || undefined,
@@ -336,7 +336,6 @@ const BomPage: React.FC = () => {
               <thead>
                 <tr>
                   <th>DISH NAME</th>
-                  <th>KITCHEN PRICE</th>
                   <th>INGREDIENTS</th>
                   <th>DATE CONFIGURED</th>
                   <th>ACTIONS</th>
@@ -346,9 +345,6 @@ const BomPage: React.FC = () => {
                 {boms.map((b) => (
                   <tr key={b._id}>
                     <td><strong>{b.dishName.toUpperCase()}</strong></td>
-                    <td>
-                      <span className="price-cell">₹ {(b.kitchenPrice || 0).toFixed(2)}</span>
-                    </td>
                     <td>
                       <span className="unit-tag">{b.items.length} ITEMS</span>
                     </td>
@@ -422,20 +418,15 @@ const BomPage: React.FC = () => {
                     />
                   </div>
                 )}
-                <div className="form-group">
-                  <label>Kitchen Price (₹)</label>
-                  <div className="price-input-wrap">
-                    <span className="inr">₹</span>
-                    <input
-                      type="number"
-                      value={kitchenPrice}
-                      onChange={(e) => setKitchenPrice(e.target.value)}
-                      min="0"
-                      step="0.01"
-                      placeholder="0.00"
-                      className="price-input"
-                    />
-                  </div>
+                <div className="form-group" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '24px' }}>
+                  <input
+                    type="checkbox"
+                    id="isSoldB2C"
+                    checked={isSoldB2C}
+                    onChange={(e) => setIsSoldB2C(e.target.checked)}
+                    style={{ width: 'auto', height: 'auto', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="isSoldB2C" style={{ display: 'inline', margin: 0, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 800 }}>AVAILABLE FOR B2C SALE</label>
                 </div>
               </div>
 

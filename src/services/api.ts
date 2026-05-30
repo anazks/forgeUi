@@ -63,6 +63,8 @@ export const menuApi = {
   getRates: (entityId?: string) => api.get(`/menus/rates${entityId ? `?entity=${entityId}` : ''}`),
   updateRate: (data: { menuId?: string; bomId?: string; centerId: string; rate: number; entityId?: string }) =>
     api.post('/menus/rates', data),
+  updateRatesBulk: (data: any[]) =>
+    api.post('/menus/rates/bulk', data),
 };
 
 export const bomApi = {
@@ -136,7 +138,7 @@ export const eventApi = {
   delete: (id: string) => api.delete(`/events/${id}`),
 };
 
-export const expenseApi = {
+export const expenseCategoryApi = {
   getAll: (entityId?: string) => api.get(`/expense-categories${entityId ? `?entity=${entityId}` : ''}`),
   create: (data: any) => api.post('/expense-categories', data),
   delete: (id: string) => api.delete(`/expense-categories/${id}`),
@@ -182,6 +184,9 @@ export const financeApi = {
   getStats: (entityId?: string) => api.get(`/finance/stats${entityId ? `?entityId=${entityId}` : ''}`),
   getAll: (entityId?: string) => api.get(`/finance${entityId ? `?entityId=${entityId}` : ''}`),
   create: (data: any) => api.post('/finance', data),
+  getFinanceStats: (entityId?: string) => api.get(entityId ? `/revenue/finance/stats?entity=${entityId}` : '/revenue/finance/stats'),
+  getFinanceLocationDetails: (locationId: string, entityId?: string) => api.get(`/revenue/finance/location/${locationId}${entityId ? `?entity=${entityId}` : ''}`),
+  saveFinanceVerification: (data: { locationId: string; date: string; verificationData: any }) => api.post('/revenue/finance/verify', data),
 };
 
 export const inventoryApi = {
@@ -189,4 +194,33 @@ export const inventoryApi = {
   update: (id: string, data: any) => api.put(`/inventory/${id}`, data),
 };
 
+export const revenueApi = {
+  getDaily: (date: string, centerId?: string, startDate?: string, endDate?: string) => {
+    let url = `/revenue/daily?`;
+    if (startDate && endDate) {
+      url += `startDate=${startDate}&endDate=${endDate}`;
+    } else {
+      url += `date=${date}`;
+    }
+    if (centerId) {
+      url += `&centerId=${centerId}`;
+    }
+    return api.get(url);
+  },
+  confirmTab: (data: { date: string; tabType: string; salesData: any; centerId?: string }) =>
+    api.post(`/revenue/daily/confirm-tab${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
+  closeDaily: (data: { date: string; centerId?: string }) =>
+    api.post(`/revenue/daily/close${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
+};
+
+export const expenseApi = {
+  create: (data: any) => api.post('/expenses', data),
+  getAll: (params?: any) => api.get('/expenses', { params }),
+  cooApprove: (id: string) => api.put(`/expenses/${id}/coo-approve`),
+  cooReject: (id: string) => api.put(`/expenses/${id}/coo-reject`),
+  financeApprove: (id: string) => api.put(`/expenses/${id}/finance-approve`),
+  financeReject: (id: string) => api.put(`/expenses/${id}/finance-reject`),
+};
+
 export default api;
+

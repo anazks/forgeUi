@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi } from '../services/api';
+import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { 
   ShoppingBag, Plus, Trash2, Check, X, 
@@ -17,6 +17,7 @@ const PurchasePage: React.FC = () => {
   const user = userStr ? JSON.parse(userStr) : null;
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const isStore = user?.role === 'STORE';
+  const isLocationUser = ['STORE', 'CENTERS', 'RESTAURANT', 'RESORT', 'AGGREGATE', 'KITCHEN'].includes(user?.role);
 
   // Data states
   const [requests, setRequests] = useState<any[]>([]);
@@ -25,6 +26,7 @@ const PurchasePage: React.FC = () => {
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [vendors, setVendors] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
   
   // UI states
   const [isLoading, setIsLoading] = useState(true);
@@ -32,6 +34,14 @@ const PurchasePage: React.FC = () => {
   const [internalOrders, setInternalOrders] = useState<any[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    category: 'Transport- Food',
+    amount: 0,
+    paymentMethod: 'Cash'
+  });
   const [showBillModal, setShowBillModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
   const [selectedPR, setSelectedPR] = useState<any>(null);
@@ -67,14 +77,15 @@ const PurchasePage: React.FC = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [rRes, bRes, iRes, vRes, locRes, mRes, intRes] = await Promise.all([
+      const [rRes, bRes, iRes, vRes, locRes, mRes, intRes, expRes] = await Promise.all([
         purchaseApi.getRequests(),
         purchaseApi.getBills(),
         rawMaterialApi.getAll(entityId),
         vendorApi.getAll(entityId),
         userApi.getLocations(entityId),
         menuApi.getAll(entityId),
-        productionApi.getOrders('receive')
+        productionApi.getOrders('receive'),
+        expenseApi.getAll()
       ]);
       setRequests(rRes.data.data || []);
       setBills(bRes.data.data || []);
@@ -83,6 +94,7 @@ const PurchasePage: React.FC = () => {
       setLocations(locRes.data.data || []);
       setMenuItems(mRes.data.data || []);
       setInternalOrders(intRes.data.data || []);
+      setExpenses(expRes.data.data || []);
     } catch (err) {
       console.error('Failed to fetch purchase data');
     } finally {
@@ -201,6 +213,31 @@ const PurchasePage: React.FC = () => {
     }
   };
 
+  // --- Manual Expense Logic ---
+  const handleSubmitExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!expenseForm.description || expenseForm.amount <= 0) {
+      return alert('Please fill in all fields correctly');
+    }
+    try {
+      setIsProcessing(true);
+      await expenseApi.create(expenseForm);
+      setShowExpenseModal(false);
+      setExpenseForm({
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        category: 'Transport- Food',
+        amount: 0,
+        paymentMethod: 'Cash'
+      });
+      fetchData();
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to add expense');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleUpdateBillDirect = async (billId: string, updates: any) => {
     try {
       setIsProcessing(true);
@@ -302,10 +339,15 @@ const PurchasePage: React.FC = () => {
           <h1>PURCHASE WORKFLOW</h1>
           <p className="subtitle">Accept deliveries and update inventory</p>
         </div>
-        <div className="header-actions">
+        <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
           {isStore && activeTab === 'VENDOR' && (
             <button className="btn-primary" onClick={() => setShowRequestModal(true)}>
               <Plus size={16} /> NEW PURCHASE REQUEST
+            </button>
+          )}
+          {isLocationUser && activeTab === 'VENDOR' && (
+            <button className="btn-secondary" onClick={() => setShowExpenseModal(true)}>
+              <Plus size={16} /> ADD EXPENSE
             </button>
           )}
         </div>
@@ -316,7 +358,7 @@ const PurchasePage: React.FC = () => {
           className={`tab-item ${activeTab === 'VENDOR' ? 'active' : ''}`}
           onClick={() => setActiveTab('VENDOR')}
         >
-          <ShoppingBag size={14} /> VENDOR PURCHASES
+          <ShoppingBag size={14} /> VENDOR PURCHASES &amp; EXPENSES
         </button>
         <button 
           className={`tab-item ${activeTab === 'INTERNAL' ? 'active' : ''}`}
@@ -418,6 +460,52 @@ const PurchasePage: React.FC = () => {
                 )}
               </tbody>
             </table>
+
+            {/* Manual Expenses Section */}
+            <div style={{ marginTop: '32px', borderTop: '1px solid var(--border-main)', paddingTop: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '0 16px' }}>
+                <h2 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '0.5px' }}>MANUAL EXPENSES LOG</h2>
+              </div>
+              <table className="sharp-table">
+                <thead>
+                  <tr>
+                    <th>DATE</th>
+                    <th>CATEGORY</th>
+                    <th>DESCRIPTION</th>
+                    <th>AMOUNT (₹)</th>
+                    <th>PAYMENT METHOD</th>
+                    <th>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {expenses.length === 0 ? (
+                    <tr><td colSpan={6} className="text-center py-8 text-dim">No manual expenses logged.</td></tr>
+                  ) : (
+                    expenses.map((exp, idx) => {
+                      let statusClass = 'status-pending';
+                      if (exp.status === 'APPROVED') statusClass = 'status-paid';
+                      if (exp.status === 'REJECTED') statusClass = 'status-rejected';
+                      if (exp.status === 'PENDING_FINANCE') statusClass = 'status-billed';
+
+                      return (
+                        <tr key={idx}>
+                          <td>{new Date(exp.date).toLocaleDateString()}</td>
+                          <td><strong>{exp.category}</strong></td>
+                          <td>{exp.description}</td>
+                          <td>₹ {exp.amount.toFixed(2)}</td>
+                          <td>{exp.paymentMethod}</td>
+                          <td>
+                            <span className={`status-pill ${statusClass}`}>
+                              {exp.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         ) : (
           <div className="table-wrapper">
@@ -876,6 +964,95 @@ const PurchasePage: React.FC = () => {
                 {isProcessing ? 'UPDATING...' : 'CONFIRM UPDATES'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Expense Modal */}
+      {showExpenseModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <div className="modal-header">
+              <h2>MANUALLY RECORD EXPENSE</h2>
+              <button className="close-btn" onClick={() => setShowExpenseModal(false)}>&times;</button>
+            </div>
+            <form onSubmit={handleSubmitExpense}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="input-group">
+                  <label>EXPENSE DATE</label>
+                  <input 
+                    type="date" 
+                    value={expenseForm.date} 
+                    onChange={e => setExpenseForm(prev => ({ ...prev, date: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <label>CATEGORY</label>
+                  <select 
+                    value={expenseForm.category} 
+                    onChange={e => setExpenseForm(prev => ({ ...prev, category: e.target.value }))}
+                    required
+                  >
+                    {[
+                      'Transport- Food',
+                      'Petrol Expenses',
+                      'Staff travelling Expenses',
+                      'Staff Welfare Expenses',
+                      'Cleaning Charges',
+                      'Repair and Maintenance',
+                      'Consumable Purchase',
+                      'Rent',
+                      'Gas',
+                      'Electricity Charges',
+                      'Water Charges'
+                    ].map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="input-group">
+                  <label>DESCRIPTION</label>
+                  <input 
+                    type="text" 
+                    placeholder="Enter details about this expense..."
+                    value={expenseForm.description} 
+                    onChange={e => setExpenseForm(prev => ({ ...prev, description: e.target.value }))}
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <label>AMOUNT (₹)</label>
+                  <input 
+                    type="number" 
+                    placeholder="0.00"
+                    value={expenseForm.amount || ''} 
+                    onChange={e => setExpenseForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                    min="0.01"
+                    step="0.01"
+                    required
+                  />
+                </div>
+                <div className="input-group">
+                  <label>PAYMENT METHOD</label>
+                  <select 
+                    value={expenseForm.paymentMethod} 
+                    onChange={e => setExpenseForm(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                    required
+                  >
+                    {['Cash', 'UPI', 'Card', 'Bank Transfer'].map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn-cancel" onClick={() => setShowExpenseModal(false)}>CANCEL</button>
+                <button type="submit" className="btn-save" disabled={isProcessing}>
+                  {isProcessing ? 'SAVING...' : 'RECORD EXPENSE'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { vendorApi, employeeApi, bankApi, eventApi, expenseApi } from '../services/api';
+import { vendorApi, employeeApi, bankApi, eventApi, expenseCategoryApi } from '../services/api';
 import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { 
@@ -100,7 +100,7 @@ const MasterDatabasePage: React.FC = () => {
   const fetchExpenseCats = async () => {
     try {
       setIsLoading(true);
-      const res = await expenseApi.getAll(entityId);
+      const res = await expenseCategoryApi.getAll(entityId);
       setExpenseCats(res.data.data || []);
     } catch (err) { console.error('Failed to fetch expenses'); }
     finally { setIsLoading(false); }
@@ -138,7 +138,7 @@ const MasterDatabasePage: React.FC = () => {
         });
         fetchEvents();
       } else if (activeTab === 'expenses') {
-        await expenseApi.create({
+        await expenseCategoryApi.create({
           categoryName: formData.categoryName_exp,
           applicableLocations: formData.applicableLocations,
           status: formData.status_exp,
@@ -193,7 +193,7 @@ const MasterDatabasePage: React.FC = () => {
         await eventApi.delete(id);
         fetchEvents();
       } else if (activeTab === 'expenses') {
-        await expenseApi.delete(id);
+        await expenseCategoryApi.delete(id);
         fetchExpenseCats();
       }
     } catch (err: any) {

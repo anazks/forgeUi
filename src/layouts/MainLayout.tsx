@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -24,9 +24,11 @@ import {
   Trash2,
   Banknote,
   TrendingDown,
-  DollarSign
+  DollarSign,
+  Landmark
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
+import { userApi } from '../services/api';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -36,9 +38,25 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
-  
+  const [financeLocations, setFinanceLocations] = useState<any[]>([]);
+
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
+
+  useEffect(() => {
+    if (user?.role === 'FINANCE') {
+      const entityId = user.entity?._id || user.entity;
+      userApi.getLocations(entityId)
+        .then(res => {
+          const allLocs = res.data.data || [];
+          const saleLocs = allLocs.filter((l: any) => 
+            ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(l.role)
+          );
+          setFinanceLocations(saleLocs);
+        })
+        .catch(err => console.error('Failed to load locations in sidebar', err));
+    }
+  }, [user?.role]);
 
   const entityMatch = location.pathname.match(/^\/entity\/([^/]+)/);
   const activeEntityId = entityMatch ? entityMatch[1] : null;
@@ -74,7 +92,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isPartner = user?.role === 'PARTNER';
   const isCOO = user?.role === 'COO';
   const isResort = user?.role === 'RESORT';
-  const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN' || user?.role === 'RESTAURANT';
+  const isFinance = user?.role === 'FINANCE';
+  const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN' || user?.role === 'RESTAURANT' || user?.role === 'AGGREGATE';
+
+  const searchParams = new URLSearchParams(location.search);
+  const activeTabQuery = searchParams.get('tab') || 'dashboard';
+  const activeLocIdQuery = searchParams.get('locationId') || '';
 
   return (
     <div className="dashboard-layout">
@@ -106,6 +129,58 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 </button>
                 <button className={`nav-item ${location.pathname === '/finance' ? 'active' : ''}`} onClick={() => navigate('/finance')}>
                   <DollarSign size={18} /><span>Finance</span>
+                </button>
+              </nav>
+            </div>
+          </div>
+
+        /* FINANCE role: minimal sidebar */
+        ) : isFinance ? (
+          <div className="sidebar-scrollable">
+            <div className="sidebar-section">
+              <p className="section-title">Finance Manager</p>
+              <nav className="sidebar-nav">
+                <button 
+                  className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'dashboard' ? 'active' : ''}`} 
+                  onClick={() => navigate('/finance?tab=dashboard')}
+                >
+                  <LayoutDashboard size={18} /><span>Dashboard</span>
+                </button>
+                <button 
+                  className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'banks' ? 'active' : ''}`} 
+                  onClick={() => navigate('/finance?tab=banks')}
+                >
+                  <Landmark size={18} /><span>Bank Database</span>
+                </button>
+              </nav>
+            </div>
+
+            <div className="sidebar-section">
+              <p className="section-title">Locations</p>
+              <nav className="sidebar-nav">
+                {financeLocations.map(loc => (
+                  <button 
+                    key={loc._id}
+                    className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'location' && activeLocIdQuery === loc._id ? 'active' : ''}`} 
+                    onClick={() => navigate(`/finance?tab=location&locationId=${loc._id}`)}
+                  >
+                    <Building2 size={18} /><span>{loc.name.toUpperCase()}</span>
+                  </button>
+                ))}
+                {financeLocations.length === 0 && (
+                  <div style={{ padding: '8px 12px', fontSize: '0.75rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                    No sale locations
+                  </div>
+                )}
+              </nav>
+            </div>
+
+            <div className="sidebar-section">
+              <p className="section-title">System</p>
+              <nav className="sidebar-nav">
+                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
                 </button>
               </nav>
             </div>
@@ -183,8 +258,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <button className={`nav-item ${location.pathname === '/production' ? 'active' : ''}`} onClick={() => navigate('/production')}>
                   <ChefHat size={18} /><span>Production</span>
                 </button>
+                <button className={`nav-item ${location.pathname === '/revenue' ? 'active' : ''}`} onClick={() => navigate('/revenue')}>
+                  <DollarSign size={18} /><span>Revenue Management</span>
+                </button>
                 <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
                   <ShoppingBag size={18} /><span>New Purchase</span>
+                </button>
+                <button className={`nav-item ${location.pathname === '/expense-approvals' ? 'active' : ''}`} onClick={() => navigate('/expense-approvals')}>
+                  <DollarSign size={18} /><span>Expense Approvals</span>
                 </button>
               </nav>
             </div>
@@ -250,6 +331,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
                     <TrendingDown size={18} /><span>Wastage Management</span>
                   </button>
+                  <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
+                    <DollarSign size={18} /><span>Revenue Console</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/pricing', 'pricing') ? 'active' : ''}`} onClick={() => navTo('/pricing', 'pricing')}>
+                    <CreditCard size={18} /><span>Pricing Rates</span>
+                  </button>
                 </>
               ) : (
                 <>
@@ -284,7 +371,10 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                     <Trash2 size={18} /><span>Wastage</span>
                   </button>
                   <button className={`nav-item ${isActive('/payment-settings', 'payment-settings') ? 'active' : ''}`} onClick={() => navTo('/payment-settings', 'payment-settings')}>
-                    <CreditCard size={18} /><span>Payment Settings</span>
+                    <CreditCard size={18} /><span>Pricing Console</span>
+                  </button>
+                  <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
+                    <DollarSign size={18} /><span>Revenue Management</span>
                   </button>
                   <button className={`nav-item ${isActive('/finance', 'finance') ? 'active' : ''}`} onClick={() => navTo('/finance', 'finance')}>
                     <Banknote size={18} /><span>Finance</span>

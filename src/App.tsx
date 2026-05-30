@@ -16,9 +16,13 @@ import ProductionPage from './components/ProductionPage';
 import PaymentSettings from './components/PaymentSettings';
 import WastagePage from './components/WastagePage';
 import CentersDashboardPage from './components/CentersDashboardPage';
+import LocationPricingPage from './components/LocationPricingPage';
 import FinancePage from './components/FinancePage';
 import InventoryPage from './components/InventoryPage';
+import RevenuePage from './components/RevenuePage';
+import CooExpenseApprovalsPage from './components/CooExpenseApprovalsPage';
 import './App.css';
+
 
 function App() {
   return (
@@ -66,8 +70,14 @@ function App() {
         <Route path="/entity/:entityId/production" element={<ProductionPage />} />
         <Route path="/payment-settings" element={<PaymentSettings />} />
         <Route path="/entity/:entityId/payment-settings" element={<PaymentSettings />} />
+        <Route path="/pricing" element={<LocationPricingPage />} />
+        <Route path="/entity/:entityId/pricing" element={<LocationPricingPage />} />
+        <Route path="/revenue" element={<RevenuePage />} />
+        <Route path="/entity/:entityId/revenue" element={<RevenuePage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="/entity/:entityId/finance" element={<FinancePage />} />
+        <Route path="/expense-approvals" element={<CooExpenseApprovalsPage />} />
+        <Route path="/entity/:entityId/expense-approvals" element={<CooExpenseApprovalsPage />} />
         {/* Fallback to landing page if route not found */}
         <Route path="*" element={<LandingPage />} />
       </Routes>

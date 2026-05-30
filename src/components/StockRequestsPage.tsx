@@ -161,11 +161,13 @@ const StockRequestsPage: React.FC = () => {
     setTimeout(() => setToast(null), 4000);
   };
 
+  const actionableItems = demandSummary.items.filter(
+    (item: any) => item.type === 'MATERIAL' && item.displayGap > 0 && !raisedPrs[`${item.materialId}-${item.locationId}`]
+  );
+
   const locationsWithShortages = Array.from(
     new Set(
-      demandSummary.items
-        .filter((item: any) => item.type === 'MATERIAL' && item.approvedGap > 0)
-        .map((item: any) => item.locationId)
+      actionableItems.map((item: any) => item.locationId)
     )
   ).map(locId => {
     const loc = locations.find(l => l._id === locId);
@@ -230,7 +232,7 @@ const StockRequestsPage: React.FC = () => {
                   <AlertTriangle size={24} />
                 </div>
                 <div>
-                  <h3 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#ef4444', margin: 0 }}>{demandSummary.totalOpenDemands}</h3>
+                  <h3 style={{ fontSize: '1.4rem', fontWeight: 900, color: '#ef4444', margin: 0 }}>{actionableItems.length}</h3>
                   <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)', margin: 0 }}>ACTIONABLE RAW MATERIAL SHORTAGES (ACROSS ALL LOCATIONS)</p>
                 </div>
               </div>
@@ -296,11 +298,10 @@ const StockRequestsPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {demandSummary.items.length === 0 ? (
+                  {actionableItems.filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation).length === 0 ? (
                     <tr><td colSpan={9} className="text-center py-12 text-dim">No demands found.</td></tr>
                   ) : (
-                    demandSummary.items
-                      .filter((item: any) => item.type === 'MATERIAL' && item.displayGap > 0)
+                    actionableItems
                       .filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation)
                       .map((item: any, idx: number) => {
                         const locName = locations.find(l => l._id === item.locationId)?.name || 'Unknown Location';

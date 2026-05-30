@@ -7,7 +7,7 @@ import {
 import { entityApi, userApi, paymentApi } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
-const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGREGATE', 'PARTNER', 'RESTAURANT'];
+const ALL_ROLES = ['ADMIN', 'KITCHEN', 'CENTERS', 'STORE', 'COO', 'RESORT', 'AGGREGATE', 'PARTNER', 'RESTAURANT', 'FINANCE'];
 
 const EntityDetail: React.FC = () => {
   const { entityId: id } = useParams<{ entityId: string }>();
@@ -26,7 +26,8 @@ const EntityDetail: React.FC = () => {
 
   const [newUser, setNewUser] = useState<any>({
     name: '', email: '', password: '', mobileNo: '', area: '',
-    role: 'ADMIN', duration: 1, commissionRate: 0
+    role: 'ADMIN', duration: 1, commissionRate: 0,
+    onlineSalesEnabled: false, aggregatorPercentage: 0
   });
   const [error, setError] = useState('');
 
@@ -71,7 +72,7 @@ const EntityDetail: React.FC = () => {
       }
       setIsAddingUser(false);
       setCustomLicenseDate('');
-      setNewUser({ name: '', email: '', password: '', mobileNo: '', area: '', role: 'ADMIN', duration: 1, commissionRate: 0 });
+      setNewUser({ name: '', email: '', password: '', mobileNo: '', area: '', role: 'ADMIN', duration: 1, commissionRate: 0, onlineSalesEnabled: false, aggregatorPercentage: 0 });
       fetchData();
     } catch (err: any) {
       setError(err.response?.data?.error || 'Operation failed');
@@ -160,7 +161,7 @@ const EntityDetail: React.FC = () => {
             <Pencil size={14} /> EDIT ENTITY
           </button>
           <button className="btn-primary" onClick={() => {
-            setNewUser({ name: '', email: '', password: '', mobileNo: '', area: '', role: 'ADMIN', duration: 1, commissionRate: 0 });
+            setNewUser({ name: '', email: '', password: '', mobileNo: '', area: '', role: 'ADMIN', duration: 1, onlineSalesEnabled: false, aggregatorPercentage: 0 });
             setIsAddingUser(true);
           }}>
             <UserPlus size={16} /> ADD USER
@@ -242,9 +243,6 @@ const EntityDetail: React.FC = () => {
                     {ALL_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
-                {newUser.role === 'AGGREGATE' && (
-                  <div className="input-group"><label>COMMISSION %</label><input type="number" className="input-field" value={newUser.commissionRate} onChange={e => setNewUser({ ...newUser, commissionRate: parseFloat(e.target.value) })} required /></div>
-                )}
                 {!newUser._id && (
                   <div className="input-group">
                     <label>LICENSE MONTHS</label>
@@ -260,6 +258,31 @@ const EntityDetail: React.FC = () => {
                   <label>LICENSE EXPIRY DATE <span className="optional-label">(optional — overrides months)</span></label>
                   <input type="date" className="input-field" value={customLicenseDate} onChange={e => setCustomLicenseDate(e.target.value)} min={new Date().toISOString().split('T')[0]} />
                 </div>
+                <div className="input-group" style={{ gridColumn: '1/-1', display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0' }}>
+                  <input
+                    type="checkbox"
+                    id="onlineSalesEnabled"
+                    checked={newUser.onlineSalesEnabled || false}
+                    onChange={e => setNewUser({ ...newUser, onlineSalesEnabled: e.target.checked })}
+                    style={{ width: 'auto', height: 'auto', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="onlineSalesEnabled" style={{ display: 'inline', margin: 0, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 800 }}>ONLINE SALES THROUGH ZOMATO/SWIGGY</label>
+                </div>
+                {(newUser.onlineSalesEnabled || newUser.role === 'AGGREGATE') && (
+                  <div className="input-group" style={{ gridColumn: '1/-1' }}>
+                    <label>AGGREGATOR PERCENTAGE (%)</label>
+                    <input
+                      type="number"
+                      className="input-field"
+                      value={newUser.aggregatorPercentage || 0}
+                      onChange={e => setNewUser({ ...newUser, aggregatorPercentage: parseFloat(e.target.value) || 0 })}
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      required
+                    />
+                  </div>
+                )}
               </div>
               {error && <div className="error-message" style={{ marginTop: 8 }}>{error}</div>}
               <div className="modal-actions">

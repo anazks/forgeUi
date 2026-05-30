@@ -12,7 +12,6 @@ const MenuPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
   const [menus, setMenus] = useState<any[]>([]);
   const [boms, setBoms] = useState<any[]>([]);
-  const [centerRates, setCenterRates] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -22,8 +21,6 @@ const MenuPage: React.FC = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<TabType>('all');
-  const [editingRateItem, setEditingRateItem] = useState<any>(null);
-  const [newSellingRate, setNewSellingRate] = useState<string>('');
 
   // Ordering state
   const [orderQtys, setOrderQtys] = useState<Record<string, number>>({});
@@ -50,10 +47,9 @@ const MenuPage: React.FC = () => {
       setIsLoading(true);
       setError('');
 
-      const [menuRes, bomRes, rateRes, userRes] = await Promise.allSettled([
+      const [menuRes, bomRes, userRes] = await Promise.allSettled([
         menuApi.getAll(entityId),
         bomApi.getAll(entityId),
-        menuApi.getRates(entityId),
         userApi.getMe()
       ]);
 
@@ -65,7 +61,6 @@ const MenuPage: React.FC = () => {
         console.log('BOMs fetched:', bomRes.value.data.data);
         setBoms(bomRes.value.data.data || []);
       }
-      if (rateRes.status === 'fulfilled') setCenterRates(rateRes.value.data.data || []);
       if (userRes.status === 'fulfilled') setUser(userRes.value.data.data || null);
 
       if (menuRes.status === 'rejected') {
@@ -96,29 +91,15 @@ const MenuPage: React.FC = () => {
   // ── Build display lists ──────────────────────────────────────────────
   // DIRECT: all items from menus array (no type filter needed)
   const directItems = menus.map(m => {
-    let finalPrice: number | null = null;
-    let sellingPrice: number | null = null;
-    if (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') {
-      const customRate = centerRates.find(r => r.menu?._id === m._id && (r.center?._id === user._id || r.center === user._id));
-      if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
-    }
-    return { ...m, _source: 'DIRECT', displayPrice: finalPrice, sellingPrice };
+    return { ...m, _source: 'DIRECT' };
   });
 
   // BOM: from boms array — each BOM dish appears as a BOM-source item
   const bomItems = boms.map(b => {
-    let finalPrice: number | null = b.kitchenPrice > 0 ? b.kitchenPrice : null;
-    let sellingPrice: number | null = finalPrice;
-    if (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') {
-      const customRate = centerRates.find(r => r.bom?._id === b._id && (r.center?._id === user._id || r.center === user._id));
-      if (customRate) { finalPrice = customRate.rate; sellingPrice = customRate.centerRate || customRate.rate; }
-    }
     return {
       _id: b._id,
       _source: 'BOM',
       name: b.dishName,
-      displayPrice: finalPrice,
-      sellingPrice,
       unit: b.unit || 'pcs',
       customUnit: '',
       ingredientCount: b.items?.length || 0,
@@ -228,36 +209,7 @@ const MenuPage: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleUpdateSellingRate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingRateItem || !newSellingRate) return;
-    try {
-      setIsSubmitting(true);
-      setError('');
-      const payload: any = {
-        centerId: user._id || user.id,
-        centerRate: Number(newSellingRate)
-      };
-      if (editingRateItem._source === 'DIRECT') payload.menuId = editingRateItem._id;
-      else payload.bomId = editingRateItem._id;
-
-      await menuApi.updateRate(payload);
-      setSuccess('Selling rate updated successfully');
-      setEditingRateItem(null);
-      setNewSellingRate('');
-      fetchInitialData();
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update rate');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const openRateEdit = (item: any) => {
-    setEditingRateItem(item);
-    setNewSellingRate(item.sellingPrice.toString());
-  };
+  // Price editing removed
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -371,14 +323,6 @@ const MenuPage: React.FC = () => {
                 <tr>
                   <th>SOURCE</th>
                   <th style={{ textAlign: 'left' }}>ITEM / DISH NAME</th>
-                  {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
-                    <>
-                      <th>BUYING RATE (₹)</th>
-                      <th>SELLING RATE (₹)</th>
-                    </>
-                  ) : (
-                    <th>BASE PRICE (₹)</th>
-                  )}
                   <th>UNIT</th>
                   {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
                     <th style={{ width: '250px' }}>REQUEST QUANTITY</th>
@@ -402,25 +346,6 @@ const MenuPage: React.FC = () => {
                     <td style={{ textAlign: 'left' }}>
                       <strong className="item-name">{item.name?.toUpperCase()}</strong>
                     </td>
-                    {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
-                      <>
-                        <td className="price-cell buying">
-                          {item.displayPrice != null ? `₹ ${item.displayPrice.toFixed(2)}` : '—'}
-                        </td>
-                        <td className="price-cell selling">
-                          <div className="selling-price-wrap">
-                            {item.sellingPrice != null ? `₹ ${item.sellingPrice.toFixed(2)}` : '—'}
-                            <button className="icon-btn-mini" onClick={() => openRateEdit(item)} title="Edit Selling Price">
-                              <Edit2 size={10} />
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <td className="price-cell">
-                        {item.displayPrice != null ? `₹ ${item.displayPrice.toFixed(2)}` : '—'}
-                      </td>
-                    )}
                     <td>
                       <span className="unit-tag">
                         {(item.unit === 'custom' ? item.customUnit : item.unit)?.toUpperCase() || '—'}
@@ -481,55 +406,7 @@ const MenuPage: React.FC = () => {
         )}
       </div>
 
-      {/* Selling Rate Edit Modal */}
-      {editingRateItem && (
-        <div className="modal-overlay">
-          <div className="modal-content rate-modal">
-            <button className="close-btn" onClick={() => setEditingRateItem(null)}><X size={20} /></button>
-            <div className="modal-tag selling-tag"><IndianRupee size={12} /> CONFIGURE SELLING PRICE</div>
-            <h2>Update Selling Rate</h2>
-            <p className="item-hint">{editingRateItem.name?.toUpperCase()}</p>
-            
-            <div className="rate-comparison">
-              <div className="rc-box">
-                <span className="rc-label">BUYING FROM ADMIN</span>
-                <span className="rc-val">₹ {editingRateItem.displayPrice.toFixed(2)}</span>
-              </div>
-              <div className="rc-arrow">→</div>
-              <div className="rc-box highlight">
-                <span className="rc-label">YOUR SELLING PRICE</span>
-                <span className="rc-val">₹ {Number(newSellingRate || 0).toFixed(2)}</span>
-              </div>
-            </div>
-
-            <form onSubmit={handleUpdateSellingRate} className="standard-form">
-              <div className="form-group">
-                <label>New Selling Rate (₹)</label>
-                <div className="input-with-icon">
-                  <IndianRupee size={16} />
-                  <input
-                    type="number"
-                    value={newSellingRate}
-                    onChange={(e) => setNewSellingRate(e.target.value)}
-                    required
-                    step="0.01"
-                    min="0"
-                    placeholder="0.00"
-                    autoFocus
-                  />
-                </div>
-                <p className="margin-hint">
-                  Expected Margin: ₹ {(Number(newSellingRate) - editingRateItem.displayPrice).toFixed(2)}
-                </p>
-              </div>
-
-              <button type="submit" className="btn-submit" disabled={isSubmitting}>
-                {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : 'UPDATE SELLING PRICE'}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Price modal removed */}
 
       {/* Add / Edit Direct Menu Item Modal */}
       {isModalOpen && (

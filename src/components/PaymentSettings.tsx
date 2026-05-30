@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  CreditCard, 
   Search, 
   RefreshCw, 
   Check, 
@@ -8,7 +7,9 @@ import {
   Building2,
   Utensils,
   IndianRupee,
-  Save
+  Save,
+  Pencil,
+  X
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
@@ -20,11 +21,12 @@ const PaymentSettings: React.FC = () => {
   const [rates, setRates] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState<string | null>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Local state for temporary rate changes before saving
+  // Local state for pricing fields
   const [localRates, setLocalRates] = useState<Record<string, any>>({});
   const [localCenterRates, setLocalCenterRates] = useState<Record<string, any>>({});
 
@@ -35,37 +37,42 @@ const PaymentSettings: React.FC = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [menuRes, centerRes, rateRes, bomRes] = await Promise.all([
+      const [menuRes, locationsRes, rateRes, bomRes] = await Promise.all([
         menuApi.getAll(),
-        userApi.getMyCenters(),
+        userApi.getLocations(),
         menuApi.getRates(),
         bomApi.getAll()
       ]);
 
       const menuList = menuRes.data.data || [];
       const bomList = bomRes.data.data || [];
-      const centerList = centerRes.data.data || [];
+      const allLocations = locationsRes.data.data || [];
       const rateList = rateRes.data.data || [];
 
-      // Unify logic: List everything that can have a rate
+      // Filter locations to KITCHEN, CENTERS, RESTAURANT, AGGREGATE
+      const locationList = allLocations.filter((u: any) => 
+        ['KITCHEN', 'CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(u.role)
+      );
+
+      // Unify logic: List only Menu items that have an associated BOM (or BOMs sold directly)
       const unifiedItems: any[] = [];
       
-      // 1. Process Menu items (primary selling units)
+      // 1. Process Menu items linked to BOM
       menuList.forEach((m: any) => {
         const linkedBom = bomList.find((b: any) => (b.menuItem?._id || b.menuItem) === m._id);
-        unifiedItems.push({
-          id: m._id,
-          type: 'MENU',
-          name: m.name,
-          basePrice: m.unitPrice,
-          unit: m.unit,
-          menuId: m._id,
-          bomId: linkedBom?._id,
-          bomPrice: linkedBom?.kitchenPrice
-        });
+        if (linkedBom) {
+          unifiedItems.push({
+            id: m._id,
+            type: 'MENU',
+            name: m.name,
+            unit: m.unit,
+            menuId: m._id,
+            bomId: linkedBom._id
+          });
+        }
       });
 
-      // 2. Process BOM items that are NOT linked to any Menu (dish definitions)
+      // 2. Process BOM items sold directly (not linked to a menu item)
       bomList.forEach((b: any) => {
         const isLinked = menuList.some((m: any) => (b.menuItem?._id || b.menuItem) === m._id);
         if (!isLinked) {
@@ -73,40 +80,43 @@ const PaymentSettings: React.FC = () => {
             id: b._id,
             type: 'BOM',
             name: b.dishName,
-            basePrice: b.kitchenPrice,
-            unit: 'dish',
+            unit: b.unit || 'pcs',
             menuId: null,
-            bomId: b._id,
-            bomPrice: b.kitchenPrice
+            bomId: b._id
           });
         }
       });
 
       setItems(unifiedItems);
-      setCenters(centerList);
+      setCenters(locationList);
       setRates(rateList);
 
-      // Initialize local rates
+      // Initialize local states with database values
       const initialLocalRates: Record<string, any> = {};
       const initialLocalCenterRates: Record<string, any> = {};
       
       rateList.forEach((r: any) => {
         const itemId = r.menu?._id || r.bom?._id;
         if (itemId) {
-          initialLocalRates[`${itemId}_${r.center._id}`] = r.rate;
-          initialLocalCenterRates[`${itemId}_${r.center._id}`] = r.centerRate || 0;
+          if (!r.center) {
+            // Global Base Price
+            initialLocalRates[itemId] = r.rate;
+          } else {
+            // Location Sale Price
+            initialLocalCenterRates[`${itemId}_${r.center._id}`] = r.centerRate;
+          }
         }
       });
 
-      // For items with no custom rate, default to basePrice
+      // Leave unconfigured values completely blank
       unifiedItems.forEach(item => {
-        centerList.forEach(center => {
+        if (initialLocalRates[item.id] === undefined) {
+          initialLocalRates[item.id] = '';
+        }
+        locationList.forEach((center: any) => {
           const key = `${item.id}_${center._id}`;
-          if (initialLocalRates[key] === undefined) {
-            initialLocalRates[key] = item.basePrice;
-          }
           if (initialLocalCenterRates[key] === undefined) {
-            initialLocalCenterRates[key] = item.basePrice; // Default center rate to base price too
+            initialLocalCenterRates[key] = '';
           }
         });
       });
@@ -115,7 +125,7 @@ const PaymentSettings: React.FC = () => {
       setLocalCenterRates(initialLocalCenterRates);
 
     } catch (err: any) {
-      setError('Failed to fetch configuration data');
+      setError('Failed to fetch pricing configuration data');
     } finally {
       setIsLoading(false);
     }
@@ -125,7 +135,7 @@ const PaymentSettings: React.FC = () => {
     if (type === 'admin') {
       setLocalRates(prev => ({
         ...prev,
-        [`${itemId}_${centerId}`]: value
+        [itemId]: value
       }));
     } else {
       setLocalCenterRates(prev => ({
@@ -135,31 +145,60 @@ const PaymentSettings: React.FC = () => {
     }
   };
 
-  const saveRate = async (item: any, centerId: string, type: 'admin' | 'center') => {
-    const key = `${item.id}_${centerId}`;
-    const rateValue = type === 'admin' ? localRates[key] : localCenterRates[key];
-    const rateNum = typeof rateValue === 'string' ? parseFloat(rateValue) : rateValue;
-    
-    if (isNaN(rateNum)) {
-      setError('Invalid rate value');
-      return;
-    }
-    
+  const cancelEdit = (itemId: string) => {
+    // Reset local state to the saved rates in the database
+    const savedBaseRate = rates.find(r => !r.center && (r.menu?._id === itemId || r.bom?._id === itemId));
+    setLocalRates(prev => ({
+      ...prev,
+      [itemId]: savedBaseRate ? savedBaseRate.rate : ''
+    }));
+
+    centers.forEach(center => {
+      const key = `${itemId}_${center._id}`;
+      const savedLocationRate = rates.find(r => r.center?._id === center._id && (r.menu?._id === itemId || r.bom?._id === itemId));
+      setLocalCenterRates(prev => ({
+        ...prev,
+        [key]: savedLocationRate ? savedLocationRate.centerRate : ''
+      }));
+    });
+
+    setEditingRowId(null);
+  };
+
+  const saveRow = async (item: any) => {
+    const ratesPayload: any[] = [];
+
+    // 1. Prepare Base Price payload
+    const baseValue = localRates[item.id];
+    ratesPayload.push({
+      menuId: item.menuId,
+      bomId: item.bomId,
+      centerId: null, // Global base price
+      rate: baseValue !== '' && baseValue !== undefined ? parseFloat(baseValue) : null
+    });
+
+    // 2. Prepare location Sale Price payloads
+    centers.forEach(center => {
+      const saleValue = localCenterRates[`${item.id}_${center._id}`];
+      ratesPayload.push({
+        menuId: item.menuId,
+        bomId: item.bomId,
+        centerId: center._id,
+        centerRate: saleValue !== '' && saleValue !== undefined ? parseFloat(saleValue) : null
+      });
+    });
+
     try {
-      setIsSaving(`${key}_${type}`);
-      const payload: any = { centerId };
-      if (type === 'admin') payload.rate = rateNum;
-      else payload.centerRate = rateNum;
-
-      if (item.menuId) payload.menuId = item.menuId;
-      else if (item.bomId) payload.bomId = item.bomId;
-
-      await menuApi.updateRate(payload);
-      setSuccess(`${type === 'admin' ? 'Admin' : 'Center'} rate updated`);
+      setIsSaving(item.id);
+      await menuApi.updateRatesBulk(ratesPayload);
+      setSuccess('Pricing updated successfully');
       setTimeout(() => setSuccess(''), 3000);
       
+      // Reload rates
       const rateRes = await menuApi.getRates();
-      setRates(rateRes.data.data);
+      setRates(rateRes.data.data || []);
+      
+      setEditingRowId(null);
     } catch (err) {
       setError('Save failed');
       setTimeout(() => setError(''), 3000);
@@ -178,8 +217,8 @@ const PaymentSettings: React.FC = () => {
     <MainLayout>
       <header className="page-header">
         <div className="header-title">
-          <h1>PAYMENT SETTINGS</h1>
-          <p className="subtitle">CONFIGURE RATES PER CENTER</p>
+          <h1>PRICING CONSOLE</h1>
+          <p className="subtitle">SET DUAL PRICING SCHEME (GLOBAL BASE & LOCAL SALE PRICES)</p>
         </div>
         <div className="header-actions">
           <div className="search-box">
@@ -221,7 +260,7 @@ const PaymentSettings: React.FC = () => {
           <div className="info-block">
             <Building2 size={18} />
             <div>
-              <span className="label">TOTAL CENTERS</span>
+              <span className="label">TOTAL LOCATIONS</span>
               <span className="val">{centers.length}</span>
             </div>
           </div>
@@ -232,113 +271,150 @@ const PaymentSettings: React.FC = () => {
             <thead>
               <tr>
                 <th className="sticky-col first-col">ITEM / DISH</th>
-                <th className="bom-rate-col">BOM COST</th>
-                <th className="kitchen-rate-col">BASE RATE</th>
+                <th className="base-price-header-col">GLOBAL BASE PRICE</th>
                 {centers.map(center => (
                   <th key={center._id} className="center-col">
                     <div className="center-header-cell">
                       <span>{center.name.toUpperCase()}</span>
-                      <small>{center.entity?.name || 'Center'}</small>
+                      <small>{center.role}</small>
                     </div>
                   </th>
                 ))}
+                <th className="actions-header-col text-center">ACTIONS</th>
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map(item => (
-                <tr key={item.id}>
-                  <td className="sticky-col first-col">
-                    <div className="menu-cell">
-                      <div className={`type-tag ${item.type.toLowerCase()}`}>{item.type[0]}</div>
-                      <div className="menu-info">
-                        <span className="item-name">{item.name.toUpperCase()}</span>
-                        <small className="item-meta">{item.type === 'MENU' ? 'MENU ITEM' : 'BOM DISH'}</small>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="bom-rate-cell">
-                    {item.bomPrice !== undefined ? (
-                      <div className="bom-price-wrap">
-                        <span className="bom-val">₹ {item.bomPrice.toFixed(2)}</span>
-                        <small>PRODUCTION</small>
-                      </div>
-                    ) : (
-                      <span className="no-bom">—</span>
-                    )}
-                  </td>
-                  <td className="kitchen-rate-cell">
-                    <span className="base-price">₹ {item.basePrice.toFixed(2)}</span>
-                    <small>PER {item.unit.toUpperCase()}</small>
-                  </td>
-                  {centers.map(center => {
-                    const key = `${item.id}_${center._id}`;
-                    const currentRate = localRates[key];
-                    const currentCenterRate = localCenterRates[key];
-                    
-                    const savedRateObj = rates.find(r => 
-                      (item.menuId && r.menu?._id === item.menuId && r.center._id === center._id) ||
-                      (!item.menuId && item.bomId && r.bom?._id === item.bomId && r.center._id === center._id)
-                    );
-                    const savedRate = savedRateObj ? savedRateObj.rate : item.basePrice;
-                    const savedCenterRate = savedRateObj ? (savedRateObj.centerRate || 0) : item.basePrice;
+              {filteredItems.map(item => {
+                const isEditing = editingRowId === item.id;
+                
+                // Base price calculations
+                const baseVal = localRates[item.id];
+                const isBaseEmpty = baseVal === '' || baseVal === undefined || baseVal === null;
 
-                    const isChanged = parseFloat(currentRate as any) !== savedRate;
-                    const isCenterChanged = parseFloat(currentCenterRate as any) !== savedCenterRate;
-
-                    return (
-                      <td key={center._id} className="rate-input-cell">
-                        <div className="dual-rate-stack">
-                          {/* Admin Rate */}
-                          <div className={`input-wrapper ${isChanged ? 'changed' : ''}`}>
-                            <div className="input-label-mini">ADM</div>
-                            <IndianRupee size={10} className="currency-icon" />
-                            <input 
-                              type="number" 
-                              step="0.01"
-                              value={currentRate}
-                              onChange={(e) => handleRateChange(item.id, center._id, e.target.value, 'admin')}
-                              onFocus={(e) => e.target.select()}
-                              className="rate-input"
-                            />
-                            {isChanged && (
-                              <button 
-                                className="save-mini-btn" 
-                                onClick={() => saveRate(item, center._id, 'admin')}
-                                disabled={isSaving === `${key}_admin`}
-                              >
-                                {isSaving === `${key}_admin` ? <RefreshCw size={10} className="spin" /> : <Save size={10} />}
-                              </button>
-                            )}
-                          </div>
-
-                          {/* Center Rate */}
-                          <div className={`input-wrapper center-style ${isCenterChanged ? 'changed' : ''}`}>
-                            <div className="input-label-mini">CTR</div>
-                            <IndianRupee size={10} className="currency-icon" />
-                            <input 
-                              type="number" 
-                              step="0.01"
-                              value={currentCenterRate}
-                              onChange={(e) => handleRateChange(item.id, center._id, e.target.value, 'center')}
-                              onFocus={(e) => e.target.select()}
-                              className="rate-input"
-                            />
-                            {isCenterChanged && (
-                              <button 
-                                className="save-mini-btn center-btn" 
-                                onClick={() => saveRate(item, center._id, 'center')}
-                                disabled={isSaving === `${key}_center`}
-                              >
-                                {isSaving === `${key}_center` ? <RefreshCw size={10} className="spin" /> : <Save size={10} />}
-                              </button>
-                            )}
-                          </div>
+                return (
+                  <tr key={item.id} className={isEditing ? 'editing-row-active' : ''}>
+                    {/* Item details */}
+                    <td className="sticky-col first-col">
+                      <div className="menu-cell">
+                        <div className={`type-tag ${item.type.toLowerCase()}`}>{item.type[0]}</div>
+                        <div className="menu-info">
+                          <span className="item-name">{item.name.toUpperCase()}</span>
+                          <small className="item-meta">{item.type === 'MENU' ? 'MENU ITEM' : 'BOM DISH'} • PER {item.unit.toUpperCase()}</small>
                         </div>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                      </div>
+                    </td>
+
+                    {/* Global Base Price Cell */}
+                    <td className="base-price-cell">
+                      {isEditing ? (
+                        <div className="input-with-warning-wrapper">
+                          <div className="input-wrapper">
+                            <IndianRupee size={10} className="currency-icon" />
+                            <input 
+                              type="number" 
+                              step="0.01"
+                              value={baseVal}
+                              onChange={(e) => handleRateChange(item.id, '', e.target.value, 'admin')}
+                              onFocus={(e) => e.target.select()}
+                              className="rate-input"
+                              placeholder="0.00"
+                            />
+                          </div>
+                          {isBaseEmpty && (
+                            <div className="warning-indicator-inline" title="Warning: Base price is unconfigured">
+                              <AlertCircle size={12} />
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="cell-value-wrap">
+                          {isBaseEmpty ? (
+                            <span className="empty-warning"><AlertCircle size={12} /> Unset</span>
+                          ) : (
+                            <span className="rate-value-text">₹ {Number(baseVal).toFixed(2)}</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Location Sale Price Cells */}
+                    {centers.map(center => {
+                      const key = `${item.id}_${center._id}`;
+                      const saleVal = localCenterRates[key];
+                      const isSaleEmpty = saleVal === '' || saleVal === undefined || saleVal === null;
+
+                      return (
+                        <td key={center._id} className="rate-input-cell">
+                          {isEditing ? (
+                            <div className="input-with-warning-wrapper">
+                              <div className="input-wrapper center-style">
+                                <IndianRupee size={10} className="currency-icon" />
+                                <input 
+                                  type="number" 
+                                  step="0.01"
+                                  value={saleVal}
+                                  onChange={(e) => handleRateChange(item.id, center._id, e.target.value, 'center')}
+                                  onFocus={(e) => e.target.select()}
+                                  className="rate-input"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              {isSaleEmpty && (
+                                <div className="warning-indicator-inline" title="Warning: Sale price is unconfigured">
+                                  <AlertCircle size={12} />
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="cell-value-wrap">
+                              {isSaleEmpty ? (
+                                <span className="empty-warning"><AlertCircle size={12} /> Unset</span>
+                              ) : (
+                                <span className="rate-value-text sale-value">₹ {Number(saleVal).toFixed(2)}</span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+
+                    {/* Row Level Action Buttons */}
+                    <td className="actions-cell text-center">
+                      {isEditing ? (
+                        <div className="row-action-btns">
+                          <button 
+                            className="row-save-btn" 
+                            onClick={() => saveRow(item)}
+                            disabled={isSaving === item.id}
+                            title="Save Dish Prices"
+                          >
+                            {isSaving === item.id ? <RefreshCw size={12} className="spin" /> : <Save size={12} />}
+                            <span>Save</span>
+                          </button>
+                          <button 
+                            className="row-cancel-btn" 
+                            onClick={() => cancelEdit(item.id)}
+                            title="Cancel Changes"
+                          >
+                            <X size={12} />
+                            <span>Cancel</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <button 
+                          className="row-edit-btn"
+                          onClick={() => setEditingRowId(item.id)}
+                          disabled={editingRowId !== null}
+                          title={editingRowId !== null ? 'Another item is being edited' : 'Edit rates for this dish'}
+                        >
+                          <Pencil size={12} />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {filteredItems.length === 0 && (
@@ -390,42 +466,55 @@ const PaymentSettings: React.FC = () => {
         .item-name { font-weight: 800; color: var(--text-main); font-size: 0.85rem; line-height: 1.2; }
         .item-meta { font-size: 0.6rem; color: var(--text-dim); font-weight: 700; margin-top: 2px; }
         
-        .bom-rate-cell { background: rgba(99, 102, 241, 0.03); border-right: 1px solid var(--border-main); min-width: 140px; }
-        .bom-price-wrap { display: flex; flex-direction: column; }
-        .bom-val { font-weight: 800; color: var(--secondary); font-size: 0.9rem; }
-        .bom-price-wrap small { font-size: 0.6rem; color: var(--text-dim); font-weight: 700; margin-top: 2px; }
-        .no-bom { font-size: 0.65rem; font-weight: 800; color: var(--text-dim); opacity: 0.5; }
+        .base-price-header-col { background: rgba(249, 115, 22, 0.03); width: 160px; }
+        .base-price-cell { background: rgba(249, 115, 22, 0.01); border-right: 1px solid var(--border-main); min-width: 150px; }
+        
+        .rate-value-text { font-weight: 800; color: var(--text-main); font-size: 0.9rem; }
+        .rate-value-text.sale-value { color: #10b981; }
 
-        .kitchen-rate-cell { background: rgba(0,0,0,0.1); min-width: 150px; border-right: 1px solid var(--border-main); }
-        .base-price { display: block; font-weight: 800; color: var(--primary); font-size: 0.95rem; }
-        .kitchen-rate-cell small { font-size: 0.6rem; color: var(--text-dim); font-weight: 700; }
-        
         .center-header-cell { display: flex; flex-direction: column; }
-        .center-header-cell small { color: var(--primary); font-size: 0.6rem; margin-top: 2px; }
+        .center-header-cell small { color: var(--primary); font-size: 0.6rem; margin-top: 2px; text-transform: uppercase; }
         
-        .rate-input-cell { min-width: 160px; }
-        .dual-rate-stack { display: flex; flex-direction: column; gap: 8px; }
-        .input-wrapper { position: relative; display: flex; align-items: center; background: var(--bg-input); border: 1px solid var(--border-main); padding: 0 8px; transition: 0.2s; }
+        .rate-input-cell { min-width: 150px; }
+        .input-with-warning-wrapper { display: flex; align-items: center; gap: 6px; position: relative; }
+        .warning-indicator-inline { display: flex; align-items: center; justify-content: center; color: #f59e0b; flex-shrink: 0; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+
+        .input-wrapper { position: relative; display: flex; align-items: center; background: var(--bg-input); border: 1px solid var(--border-main); padding: 0 8px; transition: 0.2s; width: 100%; }
         .input-wrapper:focus-within { border-color: var(--primary); }
-        .input-wrapper.changed { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.1) !important; }
+        .input-wrapper.changed { border-color: var(--primary); }
         
-        .input-label-mini { font-size: 0.55rem; font-weight: 900; color: var(--text-dim); background: var(--border-main); padding: 2px 4px; margin-right: 4px; border-radius: 2px; flex-shrink: 0; }
-        .center-style { background: rgba(16, 185, 129, 0.03); }
-        .center-style .input-label-mini { background: rgba(16, 185, 129, 0.2); color: #10b981; }
-        .center-btn { background: #10b981 !important; }
-        .center-btn:hover { background: #059669 !important; }
+        .center-style { background: var(--bg-input); }
 
         .currency-icon { color: var(--text-dim); flex-shrink: 0; }
-        .rate-input { background: transparent; border: none; color: var(--text-main); padding: 6px 4px; font-size: 0.8rem; font-weight: 700; width: 100%; outline: none; -moz-appearance: textfield; }
+        .rate-input { background: transparent; border: none; color: var(--text-main); padding: 8px 4px; font-size: 0.8rem; font-weight: 700; width: 100%; outline: none; }
         .rate-input::-webkit-outer-spin-button, .rate-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
         
-        .save-mini-btn { background: var(--primary); color: white; border: none; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; margin-left: 4px; border-radius: 2px; }
-        .save-mini-btn:hover { background: var(--primary-dark); }
-        .save-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .empty-warning { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; font-weight: 800; color: #f59e0b; background: rgba(245, 158, 11, 0.08); padding: 2px 8px; border: 1px dashed rgba(245, 158, 11, 0.2); }
+        .cell-value-wrap { display: flex; align-items: center; min-height: 36px; }
+
+        /* Row Level Styling & Actions */
+        .editing-row-active { background: rgba(249, 115, 22, 0.03) !important; }
+        .editing-row-active .sticky-col { background: var(--bg-sidebar) !important; }
+        .actions-header-col { width: 180px; }
+        .actions-cell { min-width: 170px; border-left: 1px solid var(--border-main); }
         
+        .row-action-btns { display: flex; gap: 6px; justify-content: center; }
+        
+        .row-edit-btn { background: none; border: 1px solid var(--border-main); color: var(--text-main); font-size: 0.75rem; font-weight: 800; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: 0.2s; }
+        .row-edit-btn:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); background: rgba(249, 115, 22, 0.05); }
+        .row-edit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .row-save-btn { background: var(--primary); border: 1px solid var(--primary); color: white; font-size: 0.7rem; font-weight: 800; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: 0.2s; }
+        .row-save-btn:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+        
+        .row-cancel-btn { background: none; border: 1px solid var(--border-main); color: var(--text-dim); font-size: 0.7rem; font-weight: 800; padding: 6px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: 0.2s; }
+        .row-cancel-btn:hover { border-color: #ef4444; color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+
         .empty-matrix { padding: 40px; text-align: center; color: var(--text-dim); font-size: 0.85rem; font-weight: 500; }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .text-center { text-align: center !important; }
       `}</style>
     </MainLayout>
   );
