@@ -38,8 +38,11 @@
 
 * {
   box-sizing: border-box;
-  border-radius: 0 !important; /* Force sharp edges everywhere */
-  box-shadow: none !important; /* Force no shadows everywhere */
+}
+
+/* Sharp edges on interactive elements but allow card rounding */
+button, input, select, textarea {
+  border-radius: 0;
 }
 
 body {

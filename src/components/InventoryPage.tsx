@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { inventoryApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
@@ -8,6 +8,10 @@ import { Package, Search, Filter, Edit3, Save, X } from 'lucide-react';
 const InventoryPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
   
+  const { search } = useLocation();
+  const queryParams = new URLSearchParams(search);
+  const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
+
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
@@ -117,7 +121,7 @@ const InventoryPage: React.FC = () => {
                   <th>CATEGORY</th>
                   <th>CURRENT STOCK</th>
                   <th>UNIT</th>
-                  <th style={{ textAlign: 'center' }}>ACTIONS</th>
+                  {!isViewOnly && <th style={{ textAlign: 'center' }}>ACTIONS</th>}
                 </tr>
               </thead>
               <tbody>
@@ -144,27 +148,29 @@ const InventoryPage: React.FC = () => {
                       </td>
                       <td>{item.materialId?.unit?.toUpperCase()}</td>
                       
-                      <td style={{ textAlign: 'center' }}>
-                        {selectedLocation === 'ALL' ? (
-                          <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>Select location to edit</span>
-                        ) : editingId === item._id ? (
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                            <button className="btn-action-sm save" onClick={() => handleSave(item._id)} disabled={isSaving}>
-                              {isSaving ? '...' : <Save size={14} />}
+                      {!isViewOnly && (
+                        <td style={{ textAlign: 'center' }}>
+                          {selectedLocation === 'ALL' ? (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>Select location to edit</span>
+                          ) : editingId === item._id ? (
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                              <button className="btn-action-sm save" onClick={() => handleSave(item._id)} disabled={isSaving}>
+                                {isSaving ? '...' : <Save size={14} />}
+                              </button>
+                              <button className="btn-action-sm cancel" onClick={() => setEditingId(null)}>
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : (
+                            <button className="btn-action-sm edit" onClick={() => {
+                              setEditingId(item._id);
+                              setEditValue(item.currentStock);
+                            }}>
+                              <Edit3 size={14} /> EDIT STOCK
                             </button>
-                            <button className="btn-action-sm cancel" onClick={() => setEditingId(null)}>
-                              <X size={14} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button className="btn-action-sm edit" onClick={() => {
-                            setEditingId(item._id);
-                            setEditValue(item.currentStock);
-                          }}>
-                            <Edit3 size={14} /> EDIT STOCK
-                          </button>
-                        )}
-                      </td>
+                          )}
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}

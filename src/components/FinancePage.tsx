@@ -12,19 +12,21 @@ import {
   Lock, 
   Unlock, 
   ShieldAlert,
-  Building2
+  Building2,
+  X,
+  Loader2
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { financeApi, userApi, bankApi, expenseApi } from '../services/api';
+import { financeApi, userApi, bankApi, expenseApi, purchaseApi } from '../services/api';
 
-type TopTabType = 'dashboard' | 'location' | 'banks';
-type LogTabType = 'b2c' | 'b2b' | 'expenses';
+type TopTabType = 'dashboard' | 'location' | 'banks' | 'stock_purchases';
+type LogTabType = 'b2c' | 'b2b';
 
 const FinancePage: React.FC = () => {
   const routerLocation = useLocation();
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<TopTabType>('dashboard');
+  const [activeTab, setActiveTab] = useState<TopTabType>('location');
   const [logTab, setLogTab] = useState<LogTabType>('b2c');
   
   const [locations, setLocations] = useState<any[]>([]);
@@ -43,7 +45,6 @@ const FinancePage: React.FC = () => {
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
 
   // Local verification edits state indexed by date
-  // e.g. { "2026-05-28": { cashDeposited: 100, remarks: "clear", ... } }
   const [localVerification, setLocalVerification] = useState<Record<string, any>>({});
 
   const [isLoading, setIsLoading] = useState(true);
@@ -51,9 +52,43 @@ const FinancePage: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
+  // Stock Purchases bills list
+  const [bills, setBills] = useState<any[]>([]);
+
+  const fetchBills = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      const res = await purchaseApi.getBills();
+      setBills(res.data.data || []);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to fetch vendor bills');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMarkBillPaid = async (billId: string) => {
+    if (!window.confirm("Mark this vendor bill as PAID?")) return;
+    try {
+      setIsSubmitting(true);
+      setError('');
+      setSuccess('');
+      await purchaseApi.updateBill(billId, { paymentStatus: 'PAID' });
+      setSuccess('Bill marked as paid successfully!');
+      fetchBills();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to update bill payment status');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Parse parameters from search query
   const searchParams = new URLSearchParams(routerLocation.search);
-  const tabParam = searchParams.get('tab') as TopTabType || 'dashboard';
+  const tabParam = searchParams.get('tab') as TopTabType || 'location';
   const locIdParam = searchParams.get('locationId') || '';
 
   // Synchronize parameter changes with state
@@ -77,6 +112,8 @@ const FinancePage: React.FC = () => {
       fetchLocationLogs(selectedLocationId);
     } else if (activeTab === 'banks') {
       fetchBanks();
+    } else if (activeTab === 'stock_purchases') {
+      fetchBills();
     }
   }, [activeTab, selectedLocationId]);
 
@@ -102,9 +139,6 @@ const FinancePage: React.FC = () => {
       } else if (saleLocs.length > 0) {
         setSelectedLocationId(saleLocs[0]._id);
       }
-      
-      const statsRes = await financeApi.getFinanceStats(entityId);
-      setDashboardStats(statsRes.data.data);
     } catch (err: any) {
       setError('Failed to initialize Finance console');
     } finally {
@@ -144,6 +178,9 @@ const FinancePage: React.FC = () => {
           onlinePayments: rec.verification?.onlinePayments || 0,
           onlineSalesReceivedAmount: rec.verification?.onlineSalesReceivedAmount || 0,
           onlineSalesCommission: rec.verification?.onlineSalesCommission || 0,
+          aggregatorAmountReceived: rec.verification?.aggregatorAmountReceived || 0,
+          aggregatorGstVerified: rec.verification?.aggregatorGstVerified || 0,
+          aggregatorCommissionVerified: rec.verification?.aggregatorCommissionVerified || 0,
           remarks: rec.verification?.remarks || '',
           isAcknowledged: rec.verification?.isAcknowledged || false
         };
@@ -263,6 +300,17 @@ const FinancePage: React.FC = () => {
   };
 
   const getReconciliationMath = (record: any, verifInputs: any, role: string, isOnlineEnabled: boolean) => {
+    if (role === 'AGGREGATE') {
+      const reportedTotal = record.aggregatorTotalReceivable || 0;
+      const verifiedTotal = Number(verifInputs?.aggregatorAmountReceived) || 0;
+      const difference = reportedTotal - verifiedTotal;
+      return {
+        reportedTotal,
+        verifiedTotal,
+        difference
+      };
+    }
+
     const reportedCashVal = record.reportedCash || 0;
     const reportedOnlineVal = record.reportedOnline || 0;
     const onlineExpected = isOnlineEnabled ? calculateOnlineExpected(record, role) : 0;
@@ -291,13 +339,13 @@ const FinancePage: React.FC = () => {
   const getLogStatus = (rec: any) => {
     if (rec.status === 'OPEN') return { text: 'OPEN', class: 'status-open', icon: <Unlock size={12} /> };
     if (rec.verification?.isAcknowledged) return { text: 'ACKNOWLEDGED', class: 'status-ack', icon: <CheckCircle2 size={12} /> };
-    if (rec.verification?.cashDeposited > 0 || rec.verification?.onlinePayments > 0 || rec.verification?.onlineSalesReceivedAmount > 0) {
+    if (rec.verification?.cashDeposited > 0 || rec.verification?.onlinePayments > 0 || rec.verification?.onlineSalesReceivedAmount > 0 || rec.verification?.aggregatorAmountReceived > 0) {
       return { text: 'ACKNOWLEDGEMENT PENDING', class: 'status-pending', icon: <Clock size={12} /> };
     }
     return { text: 'USER CLOSED SALES', class: 'status-closed', icon: <Lock size={12} /> };
   };
 
-  if (isLoading && !dashboardStats) return <ForgeLoader />;
+  if (isLoading) return <ForgeLoader />;
 
   return (
     <MainLayout>
@@ -306,12 +354,30 @@ const FinancePage: React.FC = () => {
           <div className="header-title">
             <h1>FINANCIAL CONSOLE</h1>
             <p className="subtitle">
-              {activeTab === 'dashboard' && 'RECONCILED ROLLUPS & PENDING ACTIONS'}
               {activeTab === 'location' && `DAILY REVENUE LOGS: ${selectedLoc?.name?.toUpperCase() || ''}`}
-              {activeTab === 'banks' && 'BANK DATABASE REGISTER (READ-ONLY)'}
+              {activeTab === 'stock_purchases' && 'VENDOR BILL PAYMENT RECONCILIATIONS'}
             </p>
           </div>
         </header>
+
+        {/* Top Navigation Tabs */}
+        <div className="tabs-header" style={{ display: 'flex', borderBottom: '1px solid var(--border-main)', marginBottom: '20px', flexWrap: 'wrap', gap: '4px' }}>
+          <button 
+            className={`tab-link ${activeTab === 'location' ? 'active' : ''}`}
+            onClick={() => setActiveTab('location')}
+            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'location' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'location' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
+          >
+            SALES RECONCILIATION {selectedLoc ? `(${selectedLoc.name.toUpperCase()})` : ''}
+          </button>
+          
+          <button 
+            className={`tab-link ${activeTab === 'stock_purchases' ? 'active' : ''}`}
+            onClick={() => setActiveTab('stock_purchases')}
+            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'stock_purchases' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'stock_purchases' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
+          >
+            STOCK PURCHASES
+          </button>
+        </div>
 
         {error && (
           <div className="alert alert-error">
@@ -428,37 +494,6 @@ const FinancePage: React.FC = () => {
                     <h2>{selectedLoc.name.toUpperCase()}</h2>
                     <p>{selectedLoc.email} • {selectedLoc.mobileNo || 'No contact'}</p>
                   </div>
-
-                  <div className="indicators-group">
-                    <div className="monthly-mismatch-indicator">
-                      <div className="indicator-icon mismatch">
-                        <DollarSign size={18} />
-                      </div>
-                      <div className="indicator-info">
-                        <span className="label">MONTHLY MISMATCH</span>
-                        <strong className={`value ${getMonthlyMismatchSum() !== 0 ? 'text-error' : 'text-success'}`}>
-                          ₹ {getMonthlyMismatchSum().toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div className="bank-mapping-indicator">
-                      <div className="indicator-icon">
-                        <Landmark size={18} />
-                      </div>
-                      <div className="indicator-info">
-                        <span className="label">BANK MASTER LINK</span>
-                        {mappedBank ? (
-                          <strong className="value">
-                            {mappedBank.bankName.toUpperCase()} 
-                            <span className="account-tag">({mappedBank.accountNumber})</span>
-                          </strong>
-                        ) : (
-                          <span className="value unmapped">No bank account mapped</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </header>
 
                 <div className="sub-tabs-header">
@@ -478,12 +513,6 @@ const FinancePage: React.FC = () => {
                       B2B Dispatches
                     </button>
                   )}
-                  <button 
-                    className={`sub-tab-btn ${logTab === 'expenses' ? 'active' : ''}`}
-                    onClick={() => setLogTab('expenses')}
-                  >
-                    Expenses
-                  </button>
                 </div>
 
                 <div className="logs-accordion-container">
@@ -492,8 +521,8 @@ const FinancePage: React.FC = () => {
                     <div className="accordion-list">
                       {locationLogs.map((rec) => {
                         const verif = localVerification[rec.date] || {};
-                        const isAck = verif.isAcknowledged;
-                        const isOnlineEnabled = !!selectedLoc?.onlineSalesEnabled;
+                        const isAck = rec.verification?.isAcknowledged;
+                        const isOnlineEnabled = selectedLocRole !== 'AGGREGATE' && !!selectedLoc?.onlineSalesEnabled;
                         const math = getReconciliationMath(rec, verif, selectedLocRole, isOnlineEnabled);
                         const expectedOnline = calculateOnlineExpected(rec, selectedLocRole);
                         const b2bTotal = rec.b2bSales?.reduce((s: number, item: any) => s + (item.totalVal || 0), 0) || 0;
@@ -503,7 +532,7 @@ const FinancePage: React.FC = () => {
 
                         return (
                           <div key={rec._id} className={`accordion-day-card ${isAck ? 'card-acknowledged' : ''} ${isExpanded ? 'expanded' : ''}`}>
-                            {/* Card Header (Clickable) */}
+                            {/* Card Header */}
                             <header 
                               className="card-header-clickable"
                               onClick={() => setExpandedDate(isExpanded ? null : rec.date)}
@@ -519,7 +548,7 @@ const FinancePage: React.FC = () => {
                               <div className="right-summary">
                                 {rec.status === 'CLOSED' && (
                                   <div className="summary-math-preview">
-                                    <span>Reported: <strong>₹ {math.reportedTotal.toFixed(2)}</strong></span>
+                                    <span>Expected: <strong>₹ {math.reportedTotal.toFixed(2)}</strong></span>
                                     <span className="spacer-dash">|</span>
                                     <span>Verified: <strong>₹ {math.verifiedTotal.toFixed(2)}</strong></span>
                                     <span className="spacer-dash">|</span>
@@ -532,164 +561,263 @@ const FinancePage: React.FC = () => {
                               </div>
                             </header>
 
-                            {/* Card Body (Accordion Content) */}
+                            {/* Card Body */}
                             {isExpanded && (
                               <div className="card-expanded-body">
                                 <div className="detail-boxes-grid">
-                                  {/* Box 1: Reported Sales data */}
+                                  {/* Box 1: Reported Sales */}
                                   <div className="detail-data-box reported-box">
                                     <h3>REPORTED SALES (USER)</h3>
-                                    <div className="box-fields-list">
-                                      <div className="field-row">
-                                        <span>B2C Expected Revenue</span>
-                                        <strong>₹ {b2cExpected.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                      </div>
-                                      <div className="field-row">
-                                        <span>B2C Cash Received</span>
-                                        <strong>₹ {(rec.reportedCash || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                      </div>
-                                      <div className="field-row">
-                                        <span>B2C Online Received</span>
-                                        <strong>₹ {(rec.reportedOnline || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                      </div>
-                                      {isOnlineEnabled && (
-                                        <div className="field-row">
-                                          <span>Online Sales (Expected Net Payout)</span>
-                                          <strong>₹ {expectedOnline.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                        </div>
-                                      )}
-                                      {isB2BLocation && (
-                                        <div className="field-row">
-                                          <span>B2B Total Revenue</span>
-                                          <strong>₹ {b2bTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                        </div>
-                                      )}
-                                      <div className="field-row divider-row">
-                                        <span>Reported Total</span>
-                                        <strong className="text-primary font-large">₹ {math.reportedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                      </div>
-                                      <div className="field-row">
-                                        <span>Counter Sale Mismatch</span>
-                                        <strong className={(rec.reportedDifference || 0) !== 0 ? "text-error" : "text-success"}>
-                                          ₹ {(rec.reportedDifference || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                        </strong>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Box 2: Verification Data */}
-                                  <div className="detail-data-box verification-box">
-                                    <h3>VERIFICATION DETAILS (FINANCE)</h3>
-                                    {isAck ? (
+                                    {selectedLocRole === 'AGGREGATE' ? (
                                       <div className="box-fields-list">
                                         <div className="field-row">
-                                          <span>Cash Deposited</span>
-                                          <strong>₹ {(verif.cashDeposited || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          <span>Expected Gross Revenue</span>
+                                          <strong>₹ {(rec.aggregatorExpectedRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         <div className="field-row">
-                                          <span>Online B2C Clearing</span>
-                                          <strong>₹ {(verif.onlinePayments || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          <span>GST Deduction (5%)</span>
+                                          <strong>₹ {(rec.aggregatorGstDeduction || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
-                                        {isOnlineEnabled && (
-                                          <>
-                                            <div className="field-row">
-                                              <span>Online Payout Received</span>
-                                              <strong>₹ {(verif.onlineSalesReceivedAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                            </div>
-                                            <div className="field-row">
-                                              <span>Online Sales Commission</span>
-                                              <strong>₹ {(verif.onlineSalesCommission || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                            </div>
-                                          </>
-                                        )}
                                         <div className="field-row">
-                                          <span>Approved Expenses</span>
-                                          <strong>₹ {(rec.approvedExpensesAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          <span>Commission</span>
+                                          <strong>₹ {(rec.aggregatorCommission || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                        </div>
+                                        <div className="field-row">
+                                          <span>Daily Expenses</span>
+                                          <strong>₹ {(rec.aggregatorExpenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         <div className="field-row divider-row">
-                                          <span>Verified Deposit Total</span>
-                                          <strong className="font-large">₹ {math.verifiedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          <span>Net Expected Receivable</span>
+                                          <strong className="text-primary font-large">₹ {math.reportedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                       </div>
                                     ) : (
-                                      <div className="verification-form-inputs">
-                                        <div className="input-group-finance">
-                                          <label>Cash Deposited (₹)</label>
-                                          <input 
-                                            type="number"
-                                            value={verif.cashDeposited || ''}
-                                            onChange={e => setLocalVerification({
-                                              ...localVerification,
-                                              [rec.date]: {
-                                                ...verif,
-                                                cashDeposited: parseFloat(e.target.value) || 0
-                                              }
-                                            })}
-                                            placeholder="0.00"
-                                            disabled={rec.status === 'OPEN'}
-                                          />
+                                      <div className="box-fields-list">
+                                        <div className="field-row">
+                                          <span>B2C Expected Revenue</span>
+                                          <strong>₹ {b2cExpected.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
-                                        <div className="input-group-finance">
-                                          <label>Online B2C Clearing (₹)</label>
-                                          <input 
-                                            type="number"
-                                            value={verif.onlinePayments || ''}
-                                            onChange={e => setLocalVerification({
-                                              ...localVerification,
-                                              [rec.date]: {
-                                                ...verif,
-                                                onlinePayments: parseFloat(e.target.value) || 0
-                                              }
-                                            })}
-                                            placeholder="0.00"
-                                            disabled={rec.status === 'OPEN'}
-                                          />
+                                        <div className="field-row">
+                                          <span>B2C Cash Received</span>
+                                          <strong>₹ {(rec.reportedCash || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                        </div>
+                                        <div className="field-row">
+                                          <span>B2C Online Received</span>
+                                          <strong>₹ {(rec.reportedOnline || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         {isOnlineEnabled && (
-                                          <>
-                                            <div className="input-group-finance">
-                                              <label>Online Sales Received (₹)</label>
-                                              <input 
-                                                type="number"
-                                                value={verif.onlineSalesReceivedAmount || ''}
-                                                onChange={e => setLocalVerification({
-                                                  ...localVerification,
-                                                  [rec.date]: {
-                                                    ...verif,
-                                                    onlineSalesReceivedAmount: parseFloat(e.target.value) || 0
-                                                  }
-                                                })}
-                                                placeholder="0.00"
-                                                disabled={rec.status === 'OPEN'}
-                                              />
-                                            </div>
-                                            <div className="input-group-finance">
-                                              <label>Online Comm Charged (₹)</label>
-                                              <input 
-                                                type="number"
-                                                value={verif.onlineSalesCommission || ''}
-                                                onChange={e => setLocalVerification({
-                                                  ...localVerification,
-                                                  [rec.date]: {
-                                                    ...verif,
-                                                    onlineSalesCommission: parseFloat(e.target.value) || 0
-                                                  }
-                                                })}
-                                                placeholder="0.00"
-                                                disabled={rec.status === 'OPEN'}
-                                              />
-                                            </div>
-                                          </>
+                                          <div className="field-row">
+                                            <span>Online Sales (Expected Net Payout)</span>
+                                            <strong>₹ {expectedOnline.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          </div>
                                         )}
-                                        <div className="field-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-main)' }}>
-                                          <span>Approved Expenses</span>
-                                          <strong>₹ {(rec.approvedExpensesAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                        {isB2BLocation && (
+                                          <div className="field-row">
+                                            <span>B2B Total Revenue</span>
+                                            <strong>₹ {b2bTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          </div>
+                                        )}
+                                        <div className="field-row divider-row">
+                                          <span>Reported Total</span>
+                                          <strong className="text-primary font-large">₹ {math.reportedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                        </div>
+                                        <div className="field-row">
+                                          <span>Counter Sale Mismatch</span>
+                                          <strong className={(rec.reportedDifference || 0) !== 0 ? "text-error" : "text-success"}>
+                                            ₹ {(rec.reportedDifference || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                          </strong>
                                         </div>
                                       </div>
                                     )}
                                   </div>
 
-                                  {/* Box 3: Reconciliation and Remarks */}
+                                  {/* Box 2: Verification */}
+                                  <div className="detail-data-box verification-box">
+                                    <h3>VERIFICATION DETAILS (FINANCE)</h3>
+                                    {isAck ? (
+                                      <div className="box-fields-list">
+                                        {selectedLocRole === 'AGGREGATE' ? (
+                                          <>
+                                            <div className="field-row">
+                                              <span>Payout Received</span>
+                                              <strong>₹ {(verif.aggregatorAmountReceived || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div className="field-row">
+                                              <span>GST Verified</span>
+                                              <strong>₹ {(verif.aggregatorGstVerified || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div className="field-row">
+                                              <span>Commission Verified</span>
+                                              <strong>₹ {(verif.aggregatorCommissionVerified || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <div className="field-row">
+                                              <span>Cash Deposited</span>
+                                              <strong>₹ {(verif.cashDeposited || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            <div className="field-row">
+                                              <span>Online B2C Clearing</span>
+                                              <strong>₹ {(verif.onlinePayments || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                            {isOnlineEnabled && (
+                                              <>
+                                                <div className="field-row">
+                                                  <span>Online Payout Received</span>
+                                                  <strong>₹ {(verif.onlineSalesReceivedAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                                </div>
+                                                <div className="field-row">
+                                                  <span>Online Sales Commission</span>
+                                                  <strong>₹ {(verif.onlineSalesCommission || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                                </div>
+                                              </>
+                                            )}
+                                            <div className="field-row">
+                                              <span>Approved Expenses</span>
+                                              <strong>₹ {(rec.approvedExpensesAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                          </>
+                                        )}
+                                        <div className="field-row divider-row">
+                                          <span>Verified Total</span>
+                                          <strong className="font-large">₹ {math.verifiedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="verification-form-inputs">
+                                        {selectedLocRole === 'AGGREGATE' ? (
+                                          <>
+                                            <div className="input-group-finance">
+                                              <label>Payout Received (₹)</label>
+                                              <input 
+                                                type="number"
+                                                value={verif.aggregatorAmountReceived || ''}
+                                                onChange={e => setLocalVerification({
+                                                  ...localVerification,
+                                                  [rec.date]: {
+                                                    ...verif,
+                                                    aggregatorAmountReceived: parseFloat(e.target.value) || 0
+                                                  }
+                                                })}
+                                                placeholder="0.00"
+                                                disabled={rec.status === 'OPEN'}
+                                              />
+                                            </div>
+                                            <div className="input-group-finance">
+                                              <label>GST Verified (₹)</label>
+                                              <input 
+                                                type="number"
+                                                value={verif.aggregatorGstVerified || ''}
+                                                onChange={e => setLocalVerification({
+                                                  ...localVerification,
+                                                  [rec.date]: {
+                                                    ...verif,
+                                                    aggregatorGstVerified: parseFloat(e.target.value) || 0
+                                                  }
+                                                })}
+                                                placeholder="0.00"
+                                                disabled={rec.status === 'OPEN'}
+                                              />
+                                            </div>
+                                            <div className="input-group-finance">
+                                              <label>Commission Verified (₹)</label>
+                                              <input 
+                                                type="number"
+                                                value={verif.aggregatorCommissionVerified || ''}
+                                                onChange={e => setLocalVerification({
+                                                  ...localVerification,
+                                                  [rec.date]: {
+                                                    ...verif,
+                                                    aggregatorCommissionVerified: parseFloat(e.target.value) || 0
+                                                  }
+                                                })}
+                                                placeholder="0.00"
+                                                disabled={rec.status === 'OPEN'}
+                                              />
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <div className="input-group-finance">
+                                              <label>Cash Deposited (₹)</label>
+                                              <input 
+                                                type="number"
+                                                value={verif.cashDeposited || ''}
+                                                onChange={e => setLocalVerification({
+                                                  ...localVerification,
+                                                  [rec.date]: {
+                                                    ...verif,
+                                                    cashDeposited: parseFloat(e.target.value) || 0
+                                                  }
+                                                })}
+                                                placeholder="0.00"
+                                                disabled={rec.status === 'OPEN'}
+                                              />
+                                            </div>
+                                            <div className="input-group-finance">
+                                              <label>Online B2C Clearing (₹)</label>
+                                              <input 
+                                                type="number"
+                                                value={verif.onlinePayments || ''}
+                                                onChange={e => setLocalVerification({
+                                                  ...localVerification,
+                                                  [rec.date]: {
+                                                    ...verif,
+                                                    onlinePayments: parseFloat(e.target.value) || 0
+                                                  }
+                                                })}
+                                                placeholder="0.00"
+                                                disabled={rec.status === 'OPEN'}
+                                              />
+                                            </div>
+                                            {isOnlineEnabled && (
+                                              <>
+                                                <div className="input-group-finance">
+                                                  <label>Online Sales Received (₹)</label>
+                                                  <input 
+                                                    type="number"
+                                                    value={verif.onlineSalesReceivedAmount || ''}
+                                                    onChange={e => setLocalVerification({
+                                                      ...localVerification,
+                                                      [rec.date]: {
+                                                        ...verif,
+                                                        onlineSalesReceivedAmount: parseFloat(e.target.value) || 0
+                                                      }
+                                                    })}
+                                                    placeholder="0.00"
+                                                    disabled={rec.status === 'OPEN'}
+                                                  />
+                                                </div>
+                                                <div className="input-group-finance">
+                                                  <label>Online Comm Charged (₹)</label>
+                                                  <input 
+                                                    type="number"
+                                                    value={verif.onlineSalesCommission || ''}
+                                                    onChange={e => setLocalVerification({
+                                                      ...localVerification,
+                                                      [rec.date]: {
+                                                        ...verif,
+                                                        onlineSalesCommission: parseFloat(e.target.value) || 0
+                                                      }
+                                                    })}
+                                                    placeholder="0.00"
+                                                    disabled={rec.status === 'OPEN'}
+                                                  />
+                                                </div>
+                                              </>
+                                            )}
+                                            <div className="field-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-main)' }}>
+                                              <span>Approved Expenses</span>
+                                              <strong>₹ {(rec.approvedExpensesAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            </div>
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Box 3: Reconciliation */}
                                   <div className="detail-data-box action-box">
                                     <h3>RECONCILIATION SUMMARY</h3>
                                     
@@ -781,19 +909,19 @@ const FinancePage: React.FC = () => {
                             const b2bTotal = rec.b2bSales?.reduce((sum: number, item: any) => sum + (item.totalVal || 0), 0) || 0;
                             return (
                               <tr key={rec._id}>
-                                <td>
-                                  <div className="date-cell">
-                                    <CalendarIcon size={12} className="text-dim" />
-                                    <strong>{new Date(rec.date).toLocaleDateString()}</strong>
-                                  </div>
-                                </td>
-                                <td className="font-numeric">₹ {b2bTotal.toFixed(2)}</td>
-                                <td>
-                                  <span className={`status-badge-inline ${rec.status === 'CLOSED' ? 'closed' : 'open'}`}>
-                                    {rec.status}
-                                  </span>
-                                </td>
-                                <td>{rec.closedAt ? new Date(rec.closedAt).toLocaleString() : '—'}</td>
+                                  <td>
+                                    <div className="date-cell">
+                                      <CalendarIcon size={12} className="text-dim" />
+                                      <strong>{new Date(rec.date).toLocaleDateString()}</strong>
+                                    </div>
+                                  </td>
+                                  <td className="font-numeric">₹ {b2bTotal.toFixed(2)}</td>
+                                  <td>
+                                    <span className={`status-badge-inline ${rec.status === 'CLOSED' ? 'closed' : 'open'}`}>
+                                      {rec.status}
+                                    </span>
+                                  </td>
+                                  <td>{rec.closedAt ? new Date(rec.closedAt).toLocaleString() : '—'}</td>
                               </tr>
                             );
                           })}
@@ -807,79 +935,7 @@ const FinancePage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Expenses table logs */}
-                  {logTab === 'expenses' && (
-                    <div className="table-wrapper scroll-inside">
-                      <table className="sharp-table">
-                        <thead>
-                          <tr>
-                            <th>DATE</th>
-                            <th>DESCRIPTION</th>
-                            <th>CATEGORY</th>
-                            <th>AMOUNT</th>
-                            <th>PAYMENT METHOD</th>
-                            <th>STATUS</th>
-                            <th className="text-right">ACTIONS</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {locationExpenses.map((exp: any) => (
-                            <tr key={exp._id}>
-                              <td>
-                                <div className="date-cell">
-                                  <CalendarIcon size={12} className="text-dim" />
-                                  <strong>{new Date(exp.date).toLocaleDateString()}</strong>
-                                </div>
-                              </td>
-                              <td>{exp.description}</td>
-                              <td><span className="category-tag">{exp.category}</span></td>
-                              <td className="font-numeric">₹ {exp.amount.toFixed(2)}</td>
-                              <td>{exp.paymentMethod}</td>
-                              <td>
-                                <span className={`status-badge-inline ${
-                                  exp.status === 'APPROVED' ? 'closed' :
-                                  exp.status === 'REJECTED' ? 'rejected' :
-                                  exp.status === 'PENDING_FINANCE' ? 'pending-fin' : 'open'
-                                }`}>
-                                  {exp.status === 'PENDING_COO' && 'PENDING COO'}
-                                  {exp.status === 'PENDING_FINANCE' && 'PENDING FINANCE'}
-                                  {exp.status === 'APPROVED' && 'APPROVED'}
-                                  {exp.status === 'REJECTED' && 'REJECTED'}
-                                </span>
-                              </td>
-                              <td className="text-right">
-                                {exp.status === 'PENDING_FINANCE' ? (
-                                  <div className="action-buttons-mini-flex">
-                                    <button 
-                                      className="action-btn-mini approve-btn"
-                                      onClick={() => handleFinanceApprove(exp._id)}
-                                      disabled={isSubmitting}
-                                    >
-                                      Approve
-                                    </button>
-                                    <button 
-                                      className="action-btn-mini reject-btn"
-                                      onClick={() => handleFinanceReject(exp._id)}
-                                      disabled={isSubmitting}
-                                    >
-                                      Reject
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="text-dim">—</span>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                          {locationExpenses.length === 0 && (
-                            <tr>
-                              <td colSpan={7} className="empty-state">No expenses logged for this location.</td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {/* Expenses tab content is removed */}
                 </div>
               </>
             ) : (
@@ -944,6 +1000,75 @@ const FinancePage: React.FC = () => {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB 4: STOCK PURCHASES ──────────────────────────────────── */}
+        {activeTab === 'stock_purchases' && (
+          <div className="finance-tab-content">
+            <div className="panel">
+              <div className="panel-header" style={{ justifyContent: 'space-between' }}>
+                <h2><Landmark size={16} /> VENDOR BILLS AWAITING PAYMENT RECONCILIATION</h2>
+                <span className="badge" style={{ background: 'rgba(59,130,246,0.1)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.2)', fontSize: '0.65rem', padding: '2px 8px' }}>
+                  AWAITING PAYMENT: {bills.filter(b => b.deliveryStatus === 'DELIVERED' && b.paymentStatus !== 'PAID').length}
+                </span>
+              </div>
+              <div className="table-wrapper scroll-inside">
+                <table className="sharp-table">
+                  <thead>
+                    <tr>
+                      <th>BILL CODE / PR</th>
+                      <th>VENDOR</th>
+                      <th>DELIVERY LOCATION</th>
+                      <th>DATE DELIVERED</th>
+                      <th>TOTAL VALUE</th>
+                      <th>STATUS</th>
+                      <th style={{ textAlign: 'right' }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bills.filter(b => b.deliveryStatus === 'DELIVERED').length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="empty-state">No delivered vendor bills found.</td>
+                      </tr>
+                    ) : (
+                      bills.filter(b => b.deliveryStatus === 'DELIVERED').map((bill) => {
+                        const isPaid = bill.paymentStatus === 'PAID';
+                        const deliveryLoc = locations.find(l => l._id === bill.destinationLocation);
+                        return (
+                          <tr key={bill._id} style={{ opacity: isPaid ? 0.7 : 1 }}>
+                            <td><strong>{bill.purchaseRequest?.prCode || bill.billCode}</strong></td>
+                            <td>{bill.vendor?.vendorName || 'UNKNOWN'}</td>
+                            <td>{deliveryLoc ? deliveryLoc.name.toUpperCase() : 'UNKNOWN'}</td>
+                            <td>{new Date(bill.createdAt).toLocaleDateString()}</td>
+                            <td className="font-numeric">₹ {bill.totalAmount.toFixed(2)}</td>
+                            <td>
+                              <span className={`status-badge-inline ${isPaid ? 'closed' : 'open'}`}>
+                                {isPaid ? 'PAID' : 'PAYMENT DUE'}
+                              </span>
+                            </td>
+                            <td className="text-right">
+                              {!isPaid ? (
+                                <button 
+                                  className="action-btn-mini"
+                                  onClick={() => handleMarkBillPaid(bill._id)}
+                                  disabled={isSubmitting}
+                                  style={{ color: '#10b981', borderColor: '#10b981', marginLeft: 'auto' }}
+                                >
+                                  MARK PAID
+                                </button>
+                              ) : (
+                                <span className="text-dim">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

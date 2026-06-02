@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { vendorApi, employeeApi, bankApi, eventApi, expenseCategoryApi } from '../services/api';
+import { vendorApi, employeeApi, bankApi, eventApi, expenseCategoryApi, userApi } from '../services/api';
 import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { 
@@ -15,7 +15,7 @@ import {
 type MasterTab = 'vendors' | 'employees' | 'banks' | 'calendar' | 'expenses';
 
 const MasterDatabasePage: React.FC = () => {
-  const { entityId } = useParams<{ entityId: string }>();
+  const { entityId, tab } = useParams<{ entityId?: string; tab?: string }>();
   const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
@@ -23,7 +23,19 @@ const MasterDatabasePage: React.FC = () => {
     if (userStr) setUser(JSON.parse(userStr));
   }, []);
 
-  const [activeTab, setActiveTab] = useState<MasterTab>('vendors');
+  // Resolve activeTab based on URL route and user role
+  let activeTab: MasterTab = 'vendors';
+  if (user?.role === 'HR') {
+    activeTab = 'employees';
+  } else if (tab === 'employees') {
+    activeTab = 'employees';
+  } else if (tab === 'banks') {
+    activeTab = 'banks';
+  } else if (tab === 'special-days') {
+    activeTab = 'calendar';
+  } else if (tab === 'expenses') {
+    activeTab = 'expenses';
+  }
   const [searchTerm, setSearchTerm] = useState('');
   
   const [vendors, setVendors] = useState<any[]>([]);
@@ -32,6 +44,7 @@ const MasterDatabasePage: React.FC = () => {
   const [events, setEvents] = useState<any[]>([]);
   const [expenseCats, setExpenseCats] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [locationOptions, setLocationOptions] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
@@ -42,9 +55,9 @@ const MasterDatabasePage: React.FC = () => {
     contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
     bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
     // Employee fields
-    employeeCode: '', employeeName: '', designation: '', department: 'Finance',
+    employeeCode: '', employeeName: '', designation: '',
     dateOfJoining: '', locationType: 'Head Office', locationName: '',
-    systemRole: '', status_emp: 'Active',
+    status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
     // Bank fields
     bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '',
     // Event fields
@@ -55,7 +68,10 @@ const MasterDatabasePage: React.FC = () => {
 
   useEffect(() => {
     if (activeTab === 'vendors') fetchVendors();
-    if (activeTab === 'employees') fetchEmployees();
+    if (activeTab === 'employees') {
+      fetchEmployees();
+      fetchLocations();
+    }
     if (activeTab === 'banks') fetchBanks();
     if (activeTab === 'calendar') fetchEvents();
     if (activeTab === 'expenses') fetchExpenseCats();
@@ -68,6 +84,13 @@ const MasterDatabasePage: React.FC = () => {
       setVendors(res.data.data || []);
     } catch (err) { console.error('Failed to fetch vendors'); }
     finally { setIsLoading(false); }
+  };
+
+  const fetchLocations = async () => {
+    try {
+      const res = await userApi.getLocations(entityId);
+      setLocationOptions(res.data.data || []);
+    } catch (err) { console.error('Failed to fetch locations'); }
   };
 
   const fetchEmployees = async () => {
@@ -109,6 +132,27 @@ const MasterDatabasePage: React.FC = () => {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleEmployeeLocationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const locName = e.target.value;
+    const matchedLoc = locationOptions.find(l => l.name === locName);
+    let inferredType = 'Head Office';
+    if (matchedLoc) {
+      const role = matchedLoc.role;
+      if (role === 'KITCHEN') {
+        inferredType = 'Kitchen';
+      } else if (role === 'CENTERS' || role === 'AGGREGATE' || role === 'RESTAURANT') {
+        inferredType = 'Center';
+      } else {
+        inferredType = 'Head Office';
+      }
+    }
+    setFormData(prev => ({
+      ...prev,
+      locationName: locName,
+      locationType: inferredType
+    }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -153,9 +197,9 @@ const MasterDatabasePage: React.FC = () => {
         vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
         contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
         bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
-        employeeCode: '', employeeName: '', designation: '', department: 'Finance',
+        employeeCode: '', employeeName: '', designation: '',
         dateOfJoining: '', locationType: 'Head Office', locationName: '',
-        systemRole: '', status_emp: 'Active',
+        status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
         bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '',
         eventName: '', eventDate: '', description: '', type: 'Others',
         categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
@@ -201,41 +245,35 @@ const MasterDatabasePage: React.FC = () => {
     }
   };
 
+  const getPageHeader = () => {
+    switch (activeTab) {
+      case 'vendors':
+        return { title: 'VENDORS DATABASE', subtitle: 'MANAGE ENTERPRISE VENDORS' };
+      case 'employees':
+        return { title: 'EMPLOYEE MASTER DATABASE', subtitle: 'PERSONNEL ROSTER' };
+      case 'banks':
+        return { title: 'BANK DATABASE', subtitle: 'CENTRAL BANK ACCOUNTS REGISTER' };
+      case 'calendar':
+        return { title: 'SPECIAL DAYS & EVENTS', subtitle: 'OPERATIONAL CALENDAR AND HOLIDAYS' };
+      case 'expenses':
+        return { title: 'EXPENSE CATEGORIES', subtitle: 'MANAGE SYSTEM EXPENSE SEGMENTS' };
+      default:
+        return { title: 'MASTER DATABASE', subtitle: 'CENTRAL REPOSITORY' };
+    }
+  };
+  const headerInfo = getPageHeader();
+
   return (
     <MainLayout>
       <header className="page-header">
         <div className="header-title">
-          <h1>MASTER DATABASE</h1>
-          <p className="subtitle">CENTRAL REPOSITORY FOR CORE SYSTEM ENTITIES</p>
+          <h1>{headerInfo.title}</h1>
+          <p className="subtitle">{headerInfo.subtitle}</p>
         </div>
         <button className="btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> ADD NEW {activeTab.slice(0, -1).toUpperCase()}
+          <Plus size={16} /> ADD NEW {activeTab === 'calendar' ? 'EVENT' : activeTab.slice(0, -1).toUpperCase()}
         </button>
       </header>
-
-      {/* Navigation Tabs */}
-      <div className="master-nav">
-        <button className={`master-tab-btn ${activeTab === 'vendors' ? 'active' : ''}`} onClick={() => setActiveTab('vendors')}>
-          <Building2 size={16} /> <span>VENDORS</span>
-        </button>
-        
-        {user?.role !== 'STORE' && (
-          <>
-            <button className={`master-tab-btn ${activeTab === 'employees' ? 'active' : ''}`} onClick={() => setActiveTab('employees')}>
-              <Users size={16} /> <span>EMPLOYEES</span>
-            </button>
-            <button className={`master-tab-btn ${activeTab === 'banks' ? 'active' : ''}`} onClick={() => setActiveTab('banks')}>
-              <Landmark size={16} /> <span>BANKS</span>
-            </button>
-            <button className={`master-tab-btn ${activeTab === 'calendar' ? 'active' : ''}`} onClick={() => setActiveTab('calendar')}>
-              <Calendar size={16} /> <span>CALENDAR</span>
-            </button>
-            <button className={`master-tab-btn ${activeTab === 'expenses' ? 'active' : ''}`} onClick={() => setActiveTab('expenses')}>
-              <Layers size={16} /> <span>EXPENSES</span>
-            </button>
-          </>
-        )}
-      </div>
 
       <div className="data-panel">
         <div className="panel-header">
@@ -317,10 +355,10 @@ const MasterDatabasePage: React.FC = () => {
                       <th>CODE</th>
                       <th>NAME</th>
                       <th>DESIGNATION</th>
-                      <th>DEPT</th>
                       <th>JOINING</th>
                       <th>LOCATION</th>
-                      <th>ROLE</th>
+                      <th>SALARY</th>
+                      <th>ADDRESS</th>
                       <th>STATUS</th>
                       <th>ACTIONS</th>
                     </tr>
@@ -335,10 +373,10 @@ const MasterDatabasePage: React.FC = () => {
                           <div className="vendor-cell">
                             <strong>{e.employeeName.toUpperCase()}</strong>
                             <span className="person-sub"><Phone size={10} /> {e.contactNumber}</span>
+                            {e.emergencyContact && <span className="person-sub text-dim" style={{ fontSize: '0.65rem' }}>Alt: {e.emergencyContact}</span>}
                           </div>
                         </td>
                         <td><span className="unit-tag">{e.designation}</span></td>
-                        <td>{e.department}</td>
                         <td><span className="gst-badge">{new Date(e.dateOfJoining).toLocaleDateString()}</span></td>
                         <td>
                           <div className="credit-cell">
@@ -346,7 +384,8 @@ const MasterDatabasePage: React.FC = () => {
                             <span>{e.locationName}</span>
                           </div>
                         </td>
-                        <td>{e.systemRole || '—'}</td>
+                        <td><strong>₹{(e.monthlyTakeHomeSalary || 0).toLocaleString()}</strong></td>
+                        <td><span style={{ fontSize: '0.75rem' }} title={e.address}>{e.address || '—'}</span></td>
                         <td><span className={`status-pill ${e.status.toLowerCase().replace(' ', '-')}`}>{e.status}</span></td>
                         <td>
                           <button className="delete-action-btn" onClick={() => handleDelete(e._id, e.employeeName)}>
@@ -608,7 +647,7 @@ const MasterDatabasePage: React.FC = () => {
             <form onSubmit={handleSubmit} className="vendor-form">
               <div className="form-section">
                 <h3><ShieldCheck size={14} /> EMPLOYEE IDENTITY</h3>
-                <div className="form-grid">
+                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
                   <div className="input-group">
                     <label>EMPLOYEE CODE</label>
                     <input name="employeeCode" value={formData.employeeCode} onChange={handleInputChange} required placeholder="EMP-101" />
@@ -621,22 +660,12 @@ const MasterDatabasePage: React.FC = () => {
                     <label>DESIGNATION</label>
                     <input name="designation" value={formData.designation} onChange={handleInputChange} required placeholder="Operations Head" />
                   </div>
-                  <div className="input-group">
-                    <label>DEPARTMENT</label>
-                    <select name="department" value={formData.department} onChange={handleInputChange} required>
-                      <option value="Finance">Finance</option>
-                      <option value="Kitchen Operations">Kitchen Operations</option>
-                      <option value="Center Operations">Center Operations</option>
-                      <option value="Store Operations">Store Operations</option>
-                      <option value="Others">Others</option>
-                    </select>
-                  </div>
                 </div>
               </div>
 
               <div className="form-section">
                 <h3><Briefcase size={14} /> DEPLOYMENT DETAILS</h3>
-                <div className="form-grid">
+                <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
                   <div className="input-group">
                     <label>DATE OF JOINING</label>
                     <input name="dateOfJoining" type="date" value={formData.dateOfJoining} onChange={handleInputChange} required />
@@ -646,29 +675,29 @@ const MasterDatabasePage: React.FC = () => {
                     <input name="contactNumber" value={formData.contactNumber} onChange={handleInputChange} required placeholder="9876543210" />
                   </div>
                   <div className="input-group">
-                    <label>LOCATION TYPE</label>
-                    <select name="locationType" value={formData.locationType} onChange={handleInputChange} required>
-                      <option value="Head Office">Head Office</option>
-                      <option value="Kitchen">Kitchen</option>
-                      <option value="Center">Center</option>
-                      <option value="Resort">Resort</option>
-                      <option value="On Contract">On Contract</option>
-                      <option value="Others">Others</option>
-                    </select>
-                  </div>
-                  <div className="input-group">
                     <label>LOCATION NAME</label>
-                    <input name="locationName" value={formData.locationName} onChange={handleInputChange} required placeholder="Main Center / North Kitchen" />
+                    <select name="locationName" value={formData.locationName} onChange={handleEmployeeLocationChange} required>
+                      <option value="">SELECT LOCATION</option>
+                      {locationOptions.map((loc: any) => (
+                        <option key={loc._id} value={loc.name}>
+                          {loc.name.toUpperCase()} ({loc.role})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
 
               <div className="form-section">
-                <h3><HardHat size={14} /> SYSTEM STATUS</h3>
+                <h3><Users size={14} /> ADDITIONAL DETAILS</h3>
                 <div className="form-grid">
                   <div className="input-group">
-                    <label>SYSTEM ROLE (OPTIONAL)</label>
-                    <input name="systemRole" value={formData.systemRole} onChange={handleInputChange} placeholder="Admin / Manager / User" />
+                    <label>MONTHLY TAKE HOME (₹)</label>
+                    <input name="monthlyTakeHomeSalary" type="number" value={formData.monthlyTakeHomeSalary || ''} onChange={handleInputChange} required placeholder="50000" />
+                  </div>
+                  <div className="input-group">
+                    <label>EMERGENCY CONTACT</label>
+                    <input name="emergencyContact" value={formData.emergencyContact || ''} onChange={handleInputChange} placeholder="9876543210" />
                   </div>
                   <div className="input-group">
                     <label>EMPLOYMENT STATUS</label>
@@ -678,6 +707,10 @@ const MasterDatabasePage: React.FC = () => {
                       <option value="Terminated">Terminated</option>
                       <option value="Resigned">Resigned</option>
                     </select>
+                  </div>
+                  <div className="input-group full-width">
+                    <label>ADDRESS</label>
+                    <input name="address" value={formData.address || ''} onChange={handleInputChange} placeholder="Flat / House No, Street, City" />
                   </div>
                 </div>
               </div>

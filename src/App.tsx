@@ -21,6 +21,7 @@ import FinancePage from './components/FinancePage';
 import InventoryPage from './components/InventoryPage';
 import RevenuePage from './components/RevenuePage';
 import CooExpenseApprovalsPage from './components/CooExpenseApprovalsPage';
+import HrYearViewPage from './components/HrYearViewPage';
 import './App.css';
 
 
@@ -35,6 +36,7 @@ function App() {
         <Route path="/store-requests" element={<StockRequestsPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/menu" element={<MenuPage />} />
+        <Route path="/function-bookings" element={<MenuPage />} />
         <Route path="/bom" element={<BomPage />} />
         <Route path="/item-config" element={<ItemConfigPage />} />
         <Route path="/centers" element={<CentersDashboardPage />} />
@@ -48,6 +50,7 @@ function App() {
         <Route path="/entity/:entityId" element={<EntityDetail />} />
         <Route path="/entity/:entityId/users" element={<UsersPage />} />
         <Route path="/entity/:entityId/menu" element={<MenuPage />} />
+        <Route path="/entity/:entityId/function-bookings" element={<MenuPage />} />
         <Route path="/entity/:entityId/bom" element={<BomPage />} />
         <Route path="/entity/:entityId/centers" element={<CentersDashboardPage />} />
         <Route path="/entity/:entityId/kitchens" element={<UsersPage roleType="KITCHEN" />} />
@@ -61,7 +64,9 @@ function App() {
         <Route path="/wastage" element={<WastagePage />} />
         <Route path="/entity/:entityId/wastage" element={<WastagePage />} />
         <Route path="/master-database" element={<MasterDatabasePage />} />
+        <Route path="/master-database/:tab" element={<MasterDatabasePage />} />
         <Route path="/entity/:entityId/master-database" element={<MasterDatabasePage />} />
+        <Route path="/entity/:entityId/master-database/:tab" element={<MasterDatabasePage />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/entity/:entityId/inventory" element={<InventoryPage />} />
         <Route path="/purchase" element={<PurchasePage />} />
@@ -78,6 +83,11 @@ function App() {
         <Route path="/entity/:entityId/finance" element={<FinancePage />} />
         <Route path="/expense-approvals" element={<CooExpenseApprovalsPage />} />
         <Route path="/entity/:entityId/expense-approvals" element={<CooExpenseApprovalsPage />} />
+        
+        {/* HR year-view routes */}
+        <Route path="/hr/year-view/:year" element={<HrYearViewPage />} />
+        <Route path="/entity/:entityId/hr/year-view/:year" element={<HrYearViewPage />} />
+        
         {/* Fallback to landing page if route not found */}
         <Route path="*" element={<LandingPage />} />
       </Routes>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { foodRequestApi, userApi, vendorApi, purchaseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
@@ -30,9 +30,13 @@ const StockRequestsPage: React.FC = () => {
     return tomorrow.toISOString().split('T')[0];
   });
 
+  const { search } = useLocation();
+  const queryParams = new URLSearchParams(search);
+  const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
+
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
-  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
+  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO' || isViewOnly;
 
   useEffect(() => {
     fetchDemand();
@@ -208,7 +212,7 @@ const StockRequestsPage: React.FC = () => {
                     onChange={(e) => setSelectedLocation(e.target.value)}
                     style={{ background: 'transparent', border: 'none', color: 'var(--primary)', fontWeight: 800, outline: 'none' }}
                   >
-                    {!isStore && <option value="ALL">ALL LOCATIONS</option>}
+                    {(!isStore || isViewOnly) && <option value="ALL">ALL LOCATIONS</option>}
                     {locations.map(loc => (
                       <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
                     ))}
@@ -272,14 +276,16 @@ const StockRequestsPage: React.FC = () => {
           <div className="consolidated-section">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <h3 className="section-title"><Beaker size={14} /> STOCK REQUESTS</h3>
-              <button 
-                className="btn-seed" 
-                onClick={handleBulkRaisePR}
-                disabled={isBulkProcessing || Object.keys(selectedForPr).length === 0}
-                style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '8px 16px', fontWeight: 900, cursor: Object.keys(selectedForPr).length === 0 ? 'not-allowed' : 'pointer', borderRadius: '4px', opacity: Object.keys(selectedForPr).length === 0 ? 0.5 : 1 }}
-              >
-                {isBulkProcessing ? 'RAISING PRs...' : 'RAISE PR FOR SELECTED'}
-              </button>
+              {!isViewOnly && (
+                <button 
+                  className="btn-seed" 
+                  onClick={handleBulkRaisePR}
+                  disabled={isBulkProcessing || Object.keys(selectedForPr).length === 0}
+                  style={{ background: 'var(--primary)', color: 'white', border: 'none', padding: '8px 16px', fontWeight: 900, cursor: Object.keys(selectedForPr).length === 0 ? 'not-allowed' : 'pointer', borderRadius: '4px', opacity: Object.keys(selectedForPr).length === 0 ? 0.5 : 1 }}
+                >
+                  {isBulkProcessing ? 'RAISING PRs...' : 'RAISE PR FOR SELECTED'}
+                </button>
+              )}
             </div>
             
             <div className="table-wrapper">
@@ -294,7 +300,7 @@ const StockRequestsPage: React.FC = () => {
                     <th>ORDER QTY</th>
                     <th>UNIT PRICE (₹)</th>
                     <th>VENDOR</th>
-                    <th style={{ textAlign: 'center' }}>SELECT</th>
+                    {!isViewOnly && <th style={{ textAlign: 'center' }}>SELECT</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -319,8 +325,8 @@ const StockRequestsPage: React.FC = () => {
                             <td>{(item.requestedStock ?? item.demand).toFixed(2)} {item.unit?.toUpperCase()}</td>
                             <td style={{ color: (item.displayGap ?? item.gap) > 0 ? '#ef4444' : 'inherit', fontWeight: 900 }}>{(item.displayGap ?? item.gap).toFixed(2)} {item.unit?.toUpperCase()}</td>
                             <td>
-                                {isRaised ? (
-                                <span style={{ fontWeight: 900 }}>{orderQuantities[itemKey]} {item.unit?.toUpperCase()}</span>
+                              {isRaised || isViewOnly ? (
+                                <span style={{ fontWeight: 900 }}>{(orderQuantities[itemKey] ?? item.approvedGap)} {item.unit?.toUpperCase()}</span>
                               ) : (
                                 <input
                                   type="number"
@@ -331,7 +337,7 @@ const StockRequestsPage: React.FC = () => {
                               )}
                             </td>
                             <td>
-                              {isRaised ? (
+                              {isRaised || isViewOnly ? (
                                 <span style={{ fontWeight: 900 }}>₹{unitPrices[itemKey] || 0}</span>
                               ) : (
                                 <input 
@@ -346,6 +352,8 @@ const StockRequestsPage: React.FC = () => {
                             <td>
                               {isRaised ? (
                                 <span className="status-pill status-billed">PR RAISED</span>
+                              ) : isViewOnly ? (
+                                <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>—</span>
                               ) : (
                                 <select 
                                   value={vendorForPr[itemKey] || ''}
@@ -359,16 +367,18 @@ const StockRequestsPage: React.FC = () => {
                                 </select>
                               )}
                             </td>
-                            <td style={{ textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                checked={selectedForPr[itemKey] || false}
-                                onChange={(e) => setSelectedForPr({...selectedForPr, [itemKey]: e.target.checked})}
-                                disabled={isRaised || item.approvedGap === 0}
-                                title={item.approvedGap === 0 ? 'Awaiting COO approval' : ''}
-                                style={{ transform: 'scale(1.2)', cursor: (isRaised || item.approvedGap === 0) ? 'not-allowed' : 'pointer', opacity: item.approvedGap === 0 ? 0.3 : 1 }}
-                              />
-                            </td>
+                            {!isViewOnly && (
+                              <td style={{ textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedForPr[itemKey] || false}
+                                  onChange={(e) => setSelectedForPr({...selectedForPr, [itemKey]: e.target.checked})}
+                                  disabled={isRaised || item.approvedGap === 0}
+                                  title={item.approvedGap === 0 ? 'Awaiting COO approval' : ''}
+                                  style={{ transform: 'scale(1.2)', cursor: (isRaised || item.approvedGap === 0) ? 'not-allowed' : 'pointer', opacity: item.approvedGap === 0 ? 0.3 : 1 }}
+                                />
+                              </td>
+                            )}
                           </tr>
                         );
                       })

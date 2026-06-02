@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useParams, useLocation } from 'react-router-dom';
 import { Package, ChefHat, Info, AlertTriangle } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import { productionApi, userApi, bomApi, foodRequestApi } from '../services/api';
@@ -14,9 +15,14 @@ const ProductionPage: React.FC = () => {
   const [boms, setBoms] = useState<any[]>([]);
   const [selectedProduceItem, setSelectedProduceItem] = useState<any | null>(null);
   
+  const { search } = useLocation();
+  const queryParams = new URLSearchParams(search);
+  
   // User context
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
+  const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
+
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
 
   // Forms
@@ -305,7 +311,7 @@ const ProductionPage: React.FC = () => {
                           style={{ margin: '0 auto' }}
                           onClick={() => openDispatchModal(order)}
                         >
-                          <Package size={14} /> OPEN
+                          <Package size={14} /> {isViewOnly ? 'VIEW' : 'OPEN'}
                         </button>
                       </td>
                     </tr>
@@ -321,13 +327,15 @@ const ProductionPage: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
             <div className="modal-header">
-              <h2>DISPATCH ORDER: {selectedOrder.orderCode}</h2>
+              <h2>{isViewOnly ? 'VIEW ORDER' : 'DISPATCH ORDER'}: {selectedOrder.orderCode}</h2>
               <button className="btn-close" onClick={() => setShowDispatchModal(false)}>✕</button>
             </div>
             <div className="modal-body">
-              <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
-                WARNING: DISPATCHING ITEMS WILL DEDUCT RAW MATERIALS FROM INVENTORY.
-              </p>
+              {!isViewOnly && (
+                <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
+                  WARNING: DISPATCHING ITEMS WILL DEDUCT RAW MATERIALS FROM INVENTORY.
+                </p>
+              )}
               <table className="mini-table">
                 <thead>
                   <tr>
@@ -348,7 +356,8 @@ const ProductionPage: React.FC = () => {
                             type="checkbox"
                             checked={selectedForDispatch[i._id] || false}
                             onChange={(e) => setSelectedForDispatch({...selectedForDispatch, [i._id]: e.target.checked})}
-                            style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                            disabled={isViewOnly}
+                            style={{ transform: 'scale(1.2)', cursor: isViewOnly ? 'not-allowed' : 'pointer' }}
                           />
                         </td>
                         <td><strong>{i.itemName}</strong></td>
@@ -360,8 +369,8 @@ const ProductionPage: React.FC = () => {
                             onChange={(e) => setDispatchForm({...dispatchForm, [i._id]: Number(e.target.value)})}
                             max={pendingQty}
                             min="0"
-                            disabled={!selectedForDispatch[i._id]}
-                            style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none', opacity: selectedForDispatch[i._id] ? 1 : 0.5 }}
+                            disabled={!selectedForDispatch[i._id] || isViewOnly}
+                            style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none', opacity: (selectedForDispatch[i._id] && !isViewOnly) ? 1 : 0.5 }}
                           />
                         </td>
                       </tr>
@@ -371,10 +380,16 @@ const ProductionPage: React.FC = () => {
               </table>
             </div>
             <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CANCEL</button>
-              <button className="btn-action-sm payment" onClick={handleDispatch} disabled={isProcessing || Object.keys(selectedForDispatch).filter(k => selectedForDispatch[k]).length === 0}>
-                {isProcessing ? 'PROCESSING...' : 'SET DISPATCH'}
-              </button>
+              {isViewOnly ? (
+                <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CLOSE</button>
+              ) : (
+                <>
+                  <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CANCEL</button>
+                  <button className="btn-action-sm payment" onClick={handleDispatch} disabled={isProcessing || Object.keys(selectedForDispatch).filter(k => selectedForDispatch[k]).length === 0}>
+                    {isProcessing ? 'PROCESSING...' : 'SET DISPATCH'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

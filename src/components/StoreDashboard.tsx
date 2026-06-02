@@ -1,47 +1,30 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { rawMaterialApi } from '../services/api';
+import { inventoryApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
   Package, AlertTriangle, CheckCircle, XCircle,
-  Edit3, Check, X, RefreshCw, Bell, Flame,
-  ShoppingBag
+  RefreshCw, Bell, ShoppingBag, BarChart2
 } from 'lucide-react';
-
-interface StockAlert { level: 'LOW' | 'CRITICAL'; message: string; id: string; }
 
 const StoreDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [materials, setMaterials] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editValue, setEditValue] = useState('');
-  const [alerts, setAlerts] = useState<StockAlert[]>([]);
-  const [savingId, setSavingId] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
 
-  const fetchMaterials = useCallback(async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       setIsLoading(true);
-      const res = await rawMaterialApi.getAll();
+      setError('');
+      const res = await inventoryApi.getStockSummary();
       setMaterials(res.data.data || []);
       setLastUpdated(new Date());
-
-      // Re-evaluate alerts from fresh data
-      const newAlerts: StockAlert[] = [];
-      (res.data.data || []).forEach((m: any) => {
-        if (m.currentStock === 0) {
-          newAlerts.push({ level: 'CRITICAL', message: `${m.name} is OUT OF STOCK!`, id: m._id });
-        } else if (m.currentStock < m.minimumStock) {
-          newAlerts.push({ level: 'LOW', message: `${m.name} is below minimum (${m.minimumStock} ${m.unit})`, id: m._id });
-        }
-      });
-      setAlerts(newAlerts);
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load stock data');
     } finally {
@@ -49,47 +32,10 @@ const StoreDashboard: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { fetchMaterials(); }, [fetchMaterials]);
+  useEffect(() => { fetchSummary(); }, [fetchSummary]);
 
-  const startEdit = (m: any) => {
-    setEditingId(m._id);
-    setEditValue(m.currentStock.toString());
-  };
-
-  const cancelEdit = () => { setEditingId(null); setEditValue(''); };
-
-  const saveStock = async (m: any) => {
-    const newVal = Number(editValue);
-    if (isNaN(newVal) || newVal < 0) return;
-    try {
-      setSavingId(m._id);
-      const res = await rawMaterialApi.updateStock(m._id, newVal);
-
-      // Update local state
-      setMaterials(prev => prev.map(item =>
-        item._id === m._id ? { ...item, currentStock: newVal } : item
-      ));
-
-      // Handle alert from response
-      if (res.data.alert) {
-        setAlerts(prev => {
-          const filtered = prev.filter(a => a.id !== m._id);
-          return [{ ...res.data.alert, id: m._id }, ...filtered];
-        });
-      } else {
-        // Clear alert for this item if stock is now OK
-        setAlerts(prev => prev.filter(a => a.id !== m._id));
-      }
-
-      setEditingId(null);
-      setEditValue('');
-      setLastUpdated(new Date());
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to update stock');
-    } finally {
-      setSavingId(null);
-    }
-  };
+  const getUnitLabel = (m: any) =>
+    m.unit === 'custom' ? (m.customUnit || '').toUpperCase() : m.unit?.toUpperCase?.() || '';
 
   const getStockStatus = (m: any) => {
     if (m.currentStock === 0) return 'critical';
@@ -97,29 +43,31 @@ const StoreDashboard: React.FC = () => {
     return 'ok';
   };
 
-  const getUnitLabel = (m: any) =>
-    m.unit === 'custom' ? (m.customUnit || '').toUpperCase() : m.unit.toUpperCase();
-
   const criticalCount = materials.filter(m => m.currentStock === 0).length;
   const lowCount = materials.filter(m => m.currentStock > 0 && m.currentStock < m.minimumStock).length;
   const okCount = materials.filter(m => m.currentStock >= m.minimumStock && m.minimumStock > 0).length;
 
+  const alerts = materials.filter(m => getStockStatus(m) !== 'ok');
+
   return (
     <MainLayout>
-      {/* Welcome Header */}
+      {/* Header */}
       <div className="store-header">
         <div className="store-greeting">
           <div className="store-icon"><Package size={20} /></div>
           <div>
             <h1>STOCK DASHBOARD</h1>
-            <p className="store-sub">Welcome back, <strong>{user?.name?.toUpperCase()}</strong> · STORE MANAGER</p>
+            <p className="store-sub">
+              Welcome back, <strong>{user?.name?.toUpperCase()}</strong> · STORE MANAGER
+              <span className="store-sub-note"> — Stock totals are summed across all locations in real-time</span>
+            </p>
           </div>
         </div>
         <div className="flex-center gap-2">
           <button className="btn-primary" onClick={() => navigate('/purchase')}>
             <ShoppingBag size={14} /> NEW PURCHASE
           </button>
-          <button className="btn-refresh" onClick={fetchMaterials}>
+          <button className="btn-refresh" onClick={fetchSummary}>
             <RefreshCw size={14} /> REFRESH
           </button>
         </div>
@@ -139,15 +87,21 @@ const StoreDashboard: React.FC = () => {
             <span>STOCK ALERTS ({alerts.length})</span>
           </div>
           <div className="alert-list">
-            {alerts.map((alert, i) => (
-              <div key={i} className={`alert-item ${alert.level === 'CRITICAL' ? 'alert-critical' : 'alert-low'}`}>
-                {alert.level === 'CRITICAL'
-                  ? <XCircle size={14} />
-                  : <AlertTriangle size={14} />}
-                <span>{alert.message}</span>
-                <span className="alert-badge">{alert.level}</span>
-              </div>
-            ))}
+            {alerts.map((m, i) => {
+              const status = getStockStatus(m);
+              const unit = getUnitLabel(m);
+              return (
+                <div key={i} className={`alert-item ${status === 'critical' ? 'alert-critical' : 'alert-low'}`}>
+                  {status === 'critical' ? <XCircle size={14} /> : <AlertTriangle size={14} />}
+                  <span>
+                    {status === 'critical'
+                      ? `${m.name} is OUT OF STOCK across all locations`
+                      : `${m.name} is below minimum (${m.minimumStock} ${unit}) — total: ${m.currentStock} ${unit}`}
+                  </span>
+                  <span className="alert-badge">{status.toUpperCase()}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -187,7 +141,10 @@ const StoreDashboard: React.FC = () => {
       {/* Stock Table */}
       <div className="data-panel">
         <div className="panel-header">
-          <h2>{materials.length} STOCK ITEMS</h2>
+          <div>
+            <h2>{materials.length} STOCK ITEMS</h2>
+            <p className="panel-sub">Aggregated across all locations · <BarChart2 size={11} style={{display:'inline', verticalAlign:'middle'}} /> Real-time data</p>
+          </div>
           <div className="panel-legend">
             <span className="leg ok"><span className="leg-dot"></span>OK</span>
             <span className="leg low"><span className="leg-dot"></span>LOW</span>
@@ -205,16 +162,14 @@ const StoreDashboard: React.FC = () => {
                   <th>ITEM NAME</th>
                   <th>VENDOR</th>
                   <th>MIN. STOCK</th>
-                  <th>CURRENT STOCK</th>
-                  <th>UPDATE</th>
+                  <th>TOTAL STOCK (ALL LOCATIONS)</th>
+                  <th>LOCATIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {materials.map(m => {
                   const status = getStockStatus(m);
                   const unit = getUnitLabel(m);
-                  const isEditing = editingId === m._id;
-                  const isSaving = savingId === m._id;
 
                   return (
                     <tr key={m._id} className={`stock-row ${status}`}>
@@ -240,45 +195,12 @@ const StoreDashboard: React.FC = () => {
                         <span className="min-stock">{m.minimumStock} {unit}</span>
                       </td>
                       <td>
-                        {isEditing ? (
-                          <div className="stock-edit">
-                            <input
-                              type="number"
-                              value={editValue}
-                              onChange={e => setEditValue(e.target.value)}
-                              min="0"
-                              step="0.01"
-                              autoFocus
-                              className="stock-input"
-                            />
-                            <span className="unit-hint">{unit}</span>
-                          </div>
-                        ) : (
-                          <span className={`current-stock-val ${status}`}>
-                            {m.currentStock} {unit}
-                          </span>
-                        )}
+                        <span className={`current-stock-val ${status}`}>
+                          {m.currentStock?.toFixed?.(2) ?? m.currentStock} {unit}
+                        </span>
                       </td>
                       <td>
-                        {isEditing ? (
-                          <div className="edit-actions">
-                            <button
-                              className="icon-btn save"
-                              onClick={() => saveStock(m)}
-                              disabled={isSaving}
-                              title="Save"
-                            >
-                              {isSaving ? <RefreshCw size={13} className="spin" /> : <Check size={13} />}
-                            </button>
-                            <button className="icon-btn cancel" onClick={cancelEdit} title="Cancel">
-                              <X size={13} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button className="icon-btn edit" onClick={() => startEdit(m)} title="Update Stock">
-                            <Edit3 size={14} />
-                          </button>
-                        )}
+                        <span className="loc-count">{m.locationCount} loc{m.locationCount !== 1 ? 's' : ''}</span>
                       </td>
                     </tr>
                   );
@@ -286,7 +208,7 @@ const StoreDashboard: React.FC = () => {
               </tbody>
             </table>
             {materials.length === 0 && (
-              <div className="empty-state">No items configured yet. Ask your admin to add raw materials.</div>
+              <div className="empty-state">No inventory records found. Stock is updated automatically when deliveries are received.</div>
             )}
           </div>
         )}
@@ -299,6 +221,7 @@ const StoreDashboard: React.FC = () => {
         .store-greeting h1 { font-size: 1.4rem; font-weight: 800; letter-spacing: -0.5px; }
         .store-sub { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; }
         .store-sub strong { color: var(--primary); }
+        .store-sub-note { color: var(--text-dim); opacity: 0.7; font-size: 0.7rem; margin-left: 6px; }
         .last-updated { font-size: 0.65rem; color: var(--text-dim); margin-bottom: 20px; letter-spacing: 0.3px; }
         .btn-refresh { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 8px 16px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
         .btn-refresh:hover { border-color: var(--primary); color: var(--primary); }
@@ -333,6 +256,7 @@ const StoreDashboard: React.FC = () => {
         /* Panel */
         .panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border-main); display: flex; justify-content: space-between; align-items: center; }
         .panel-header h2 { font-size: 0.75rem; color: var(--text-dim); font-weight: 800; letter-spacing: 1px; }
+        .panel-sub { font-size: 0.65rem; color: var(--text-dim); margin-top: 3px; opacity: 0.7; }
         .panel-legend { display: flex; gap: 16px; }
         .leg { display: flex; align-items: center; gap: 6px; font-size: 0.65rem; font-weight: 800; color: var(--text-dim); }
         .leg-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
@@ -369,21 +293,7 @@ const StoreDashboard: React.FC = () => {
         .current-stock-val.low { color: #eab308; }
         .current-stock-val.critical { color: #ef4444; }
 
-        /* Inline edit */
-        .stock-edit { display: flex; align-items: center; gap: 6px; justify-content: center; }
-        .stock-input { background: var(--bg-main); border: 1px solid var(--primary); color: var(--text-main); padding: 6px 8px; font-size: 0.85rem; font-weight: 700; outline: none; width: 90px; text-align: center; }
-        .unit-hint { font-size: 0.7rem; color: var(--primary); font-weight: 800; }
-
-        .edit-actions { display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .icon-btn { background: none; border: 1px solid var(--border-main); padding: 6px 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; color: var(--text-dim); }
-        .icon-btn.edit:hover { color: var(--primary); border-color: var(--primary); background: rgba(249,115,22,0.06); }
-        .icon-btn.save { color: #10b981; border-color: rgba(16,185,129,0.3); }
-        .icon-btn.save:hover { background: rgba(16,185,129,0.1); }
-        .icon-btn.cancel { color: #ef4444; border-color: rgba(239,68,68,0.3); }
-        .icon-btn.cancel:hover { background: rgba(239,68,68,0.1); }
-        .icon-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .spin { animation: spin 1s linear infinite; }
-        @keyframes spin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+        .loc-count { font-size: 0.7rem; color: var(--text-dim); font-weight: 600; padding: 2px 8px; border: 1px solid var(--border-main); }
 
         .empty-state { padding: 60px; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
       `}</style>

@@ -79,7 +79,7 @@ export const rawMaterialApi = {
   create: (data: any) => api.post('/rawmaterials', data),
   update: (id: string, data: any) => api.put(`/rawmaterials/${id}`, data),
   delete: (id: string) => api.delete(`/rawmaterials/${id}`),
-  updateStock: (id: string, currentStock: number) => api.put(`/rawmaterials/${id}/stock`, { currentStock }),
+  // updateStock removed: Store Dashboard now uses inventoryApi.getStockSummary (real aggregate data)
 };
 
 export const foodRequestApi = {
@@ -121,6 +121,26 @@ export const employeeApi = {
   create: (data: any) => api.post('/employees', data),
   update: (id: string, data: any) => api.put(`/employees/${id}`, data),
   delete: (id: string) => api.delete(`/employees/${id}`),
+  getHrDashboard: (entityId?: string) => api.get(`/employees/hr-dashboard${entityId ? `?entity=${entityId}` : ''}`),
+  getYearViews: (entityId?: string) => api.get(`/employees/year-views${entityId ? `?entity=${entityId}` : ''}`),
+  addYearView: (data: { year: number; entity?: string }) => api.post('/employees/year-views', data),
+  getYearlyConfigs: (year: number, location?: string, entityId?: string) => {
+    let url = `/employees/year-views/${year}/configs?`;
+    if (location) url += `location=${encodeURIComponent(location)}&`;
+    if (entityId) url += `entity=${entityId}&`;
+    return api.get(url);
+  },
+  updateYearlyConfig: (configId: string, data: any) => api.put(`/employees/yearly-configs/${configId}`, data),
+  getMonthlyRecords: (year: number, month: number, location?: string, entityId?: string) => {
+    let url = `/employees/year-views/${year}/months/${month}/records?`;
+    if (location) url += `location=${encodeURIComponent(location)}&`;
+    if (entityId) url += `entity=${entityId}&`;
+    return api.get(url);
+  },
+  acknowledgeMonthlyRecord: (recordId: string, data: { leavesTaken?: number; finalSalary?: number }) =>
+    api.put(`/employees/monthly-records/${recordId}/acknowledge`, data),
+  closeMonth: (year: number, month: number) => api.post(`/employees/year-views/${year}/months/${month}/close`),
+  unlockMonth: (year: number, month: number) => api.post(`/employees/year-views/${year}/months/${month}/unlock`),
 };
 
 export const bankApi = {
@@ -192,6 +212,7 @@ export const financeApi = {
 export const inventoryApi = {
   getAll: (locationId?: string) => api.get(`/inventory${locationId ? `?locationId=${locationId}` : ''}`),
   update: (id: string, data: any) => api.put(`/inventory/${id}`, data),
+  getStockSummary: () => api.get('/inventory/stock-summary'),
 };
 
 export const revenueApi = {
@@ -211,6 +232,21 @@ export const revenueApi = {
     api.post(`/revenue/daily/confirm-tab${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
   closeDaily: (data: { date: string; centerId?: string }) =>
     api.post(`/revenue/daily/close${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
+  
+  getCashClosure: (date: string, locationId?: string) =>
+    api.get(`/revenue/cash-closure?date=${date}${locationId ? `&locationId=${locationId}` : ''}`),
+  saveCashClosure: (data: { date: string; data: any; locationId?: string }) =>
+    api.put('/revenue/cash-closure', data),
+  submitCashClosure: (data: { date: string; locationId?: string }) =>
+    api.post('/revenue/cash-closure/submit', data),
+  cooApproveCashClosure: (data: { locationId: string; date: string; approvedExpenses: any[] }) =>
+    api.put('/revenue/cash-closures/coo-approve', data),
+  getPendingCooClosures: () =>
+    api.get('/revenue/cash-closures/pending-coo'),
+  getPendingFinanceClosures: () =>
+    api.get('/revenue/cash-closures/pending-finance'),
+  acknowledgeCashClosure: (id: string) =>
+    api.put(`/revenue/cash-closures/${id}/acknowledge`),
 };
 
 export const expenseApi = {
@@ -220,6 +256,17 @@ export const expenseApi = {
   cooReject: (id: string) => api.put(`/expenses/${id}/coo-reject`),
   financeApprove: (id: string) => api.put(`/expenses/${id}/finance-approve`),
   financeReject: (id: string) => api.put(`/expenses/${id}/finance-reject`),
+};
+
+export const functionOrderApi = {
+  create: (data: any) => api.post('/function-orders', data),
+  getAll: (status?: string) => api.get(status ? `/function-orders?status=${status}` : '/function-orders'),
+  updateDishes: (id: string, dishes: any[]) => api.put(`/function-orders/${id}/dishes`, { dishes }),
+  setTotalValue: (id: string, totalOrderValue: number) => api.put(`/function-orders/${id}/total-value`, { totalOrderValue }),
+  placeRequest: (id: string, deliveryDate: string) => api.post(`/function-orders/${id}/place-request`, { deliveryDate }),
+  settle: (id: string, data: { paymentMode: string; paymentAmount: number }) => api.put(`/function-orders/${id}/settle`, data),
+  acknowledge: (id: string, note?: string) => api.put(`/function-orders/${id}/acknowledge`, { note }),
+  getPendingFinance: () => api.get('/function-orders/pending-finance'),
 };
 
 export default api;

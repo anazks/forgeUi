@@ -11,13 +11,14 @@ import {
   Save, 
   Plus,
   DollarSign,
-  X
+  X,
+  Loader2
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { revenueApi, userApi, bomApi, menuApi } from '../services/api';
+import { revenueApi, userApi, bomApi, menuApi, functionOrderApi } from '../services/api';
 
-type TabType = 'b2b' | 'b2c' | 'online';
+type TabType = 'b2b' | 'b2c' | 'online' | 'event_orders' | 'cash_closure';
 
 const RevenuePage: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -31,6 +32,8 @@ const RevenuePage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  // BUG-R2: Styled closure confirmation modal
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
 
   // Dropdown list catalogs for manual additions
   const [allBoms, setAllBoms] = useState<any[]>([]);
@@ -54,6 +57,49 @@ const RevenuePage: React.FC = () => {
   const [localB2bConfirmed, setLocalB2bConfirmed] = useState(false);
   const [localB2cConfirmed, setLocalB2cConfirmed] = useState(false);
   const [localOnlineConfirmed, setLocalOnlineConfirmed] = useState(false);
+
+  // New Event Orders & Cash Closure States
+  const [functionOrders, setFunctionOrders] = useState<any[]>([]);
+  const [settleModalOpen, setSettleModalOpen] = useState(false);
+  const [settlingFo, setSettlingFo] = useState<any>(null);
+  const [settleForm, setSettleForm] = useState({
+    paymentMode: 'UPI' as 'Cash' | 'UPI' | 'Card' | 'Bank Transfer',
+    paymentAmount: 0
+  });
+
+  const [cashClosureData, setCashClosureData] = useState<any>(null);
+  const [cashExpenses, setCashExpenses] = useState<any[]>([]);
+  const [cashForm, setCashForm] = useState({
+    advanceCashTaken: 0,
+    cashDepositedToBank: 0,
+    cashInHand: 0
+  });
+
+  const fetchFoAndClosure = async () => {
+    const targetLoc = isAdminRole() ? selectedLocationId : currentUser?._id;
+    if (!targetLoc) return;
+
+    try {
+      const foRes = await functionOrderApi.getAll();
+      const foList = (foRes.data.data || []).filter((fo: any) => fo.centerId === targetLoc || !fo.centerId);
+      setFunctionOrders(foList);
+
+      const closureRes = await revenueApi.getCashClosure(selectedDate, isAdminRole() ? targetLoc : undefined);
+      if (closureRes.data.success) {
+        const record = closureRes.data.data.record;
+        const exps = closureRes.data.data.expenses || [];
+        setCashClosureData(record.cashClosure);
+        setCashExpenses(exps);
+        setCashForm({
+          advanceCashTaken: record.cashClosure?.advanceCashTaken || 0,
+          cashDepositedToBank: record.cashClosure?.cashDepositedToBank || 0,
+          cashInHand: record.cashClosure?.cashInHand || 0
+        });
+      }
+    } catch (err: any) {
+      console.error("Error fetching FO or Cash Closure:", err);
+    }
+  };
 
   // Manual addition modal states
   const [isB2bModalOpen, setIsB2bModalOpen] = useState(false);
@@ -89,6 +135,9 @@ const RevenuePage: React.FC = () => {
       const targetLoc = isAdminRole() ? selectedLocationId : currentUser._id;
       if (targetLoc) {
         fetchDailyRevenue(targetLoc, selectedDate);
+        if (targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT' || targetUserRole === 'AGGREGATE') {
+          fetchFoAndClosure();
+        }
       }
     }
   }, [selectedDate, selectedLocationId, currentUser]);
@@ -420,10 +469,8 @@ const RevenuePage: React.FC = () => {
   };
 
   const handleCloseDay = async () => {
-    if (!window.confirm("WARNING: Once closed, daily revenue records are permanently locked and cannot be reopened. Inventory for Direct items will be updated. Proceed?")) {
-      return;
-    }
-
+    // BUG-R2: confirmation is now handled by closeConfirmOpen modal, not window.confirm
+    setCloseConfirmOpen(false);
     try {
       setIsSubmitting(true);
       setError('');
@@ -455,7 +502,7 @@ const RevenuePage: React.FC = () => {
 
   const needsB2B = targetUserRole === 'KITCHEN' || targetUserRole === 'RESTAURANT';
   const needsB2C = targetUserRole === 'CENTERS' || targetUserRole === 'AGGREGATE' || targetUserRole === 'RESTAURANT';
-  const hasOnline = (targetUserRole === 'CENTERS' || targetUserRole === 'AGGREGATE' || targetUserRole === 'RESTAURANT') && targetOnlineEnabled;
+  const hasOnline = (targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT') && targetOnlineEnabled;
 
   const isClosed = revenueRecord?.status === 'CLOSED';
   const isReadOnly = isClosed;
@@ -465,6 +512,9 @@ const RevenuePage: React.FC = () => {
   const b2cReady = !needsB2C || localB2cConfirmed;
   const onlineReady = !hasOnline || localOnlineConfirmed;
   const allTabsConfirmed = b2bReady && b2cReady && onlineReady;
+
+  const isCashClosureNeeded = targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT';
+  const cashClosureSubmitted = !isCashClosureNeeded || (revenueRecord?.cashClosure?.submittedForCOO || false);
 
   // Dynamic Live Calculation of Total Revenue
   const totalB2B = b2bItems.reduce((acc, item) => acc + (item.totalVal || 0), 0);
@@ -558,13 +608,47 @@ const RevenuePage: React.FC = () => {
         {!isReadOnly && (
           <button 
             className="btn-close-day" 
-            disabled={!allTabsConfirmed || isSubmitting}
-            onClick={handleCloseDay}
+            disabled={!allTabsConfirmed || (isCashClosureNeeded && !cashClosureSubmitted) || isSubmitting}
+            onClick={() => setCloseConfirmOpen(true)}
           >
             <Lock size={14} /> CLOSE REVENUE FOR DAY
           </button>
         )}
       </div>
+
+      {/* BUG-R2: Day Closure Confirmation Modal */}
+      {closeConfirmOpen && (
+        <div className="modal-overlay">
+          <div className="close-day-modal">
+            <div className="cdm-icon"><Lock size={24} /></div>
+            <h2>LOCK DAILY REVENUE?</h2>
+            <p className="cdm-warning">
+              ⚠️ This action is <strong>permanent and irreversible</strong>. Once locked:
+            </p>
+            <ul className="cdm-list">
+              <li>All revenue records for <strong>{selectedDate}</strong> will be frozen</li>
+              <li>Inventory for <strong>Direct items sold</strong> will be automatically deducted</li>
+              <li>No further changes can be made to this day's records</li>
+            </ul>
+            <div className="cdm-actions">
+              <button 
+                className="btn-cancel-modal"
+                onClick={() => setCloseConfirmOpen(false)}
+                disabled={isSubmitting}
+              >
+                <X size={14} /> CANCEL
+              </button>
+              <button 
+                className="btn-confirm-close" 
+                onClick={handleCloseDay}
+                disabled={isSubmitting}
+              >
+                <Lock size={14} /> {isSubmitting ? 'LOCKING...' : 'LOCK REVENUE'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab Selectors */}
       <div className="tabs-header">
@@ -603,6 +687,38 @@ const RevenuePage: React.FC = () => {
           >
             ONLINE SALES
             {localOnlineConfirmed ? (
+              <span className="tab-status verified"><CheckCircle2 size={10} /></span>
+            ) : (
+              <span className="tab-status warning"><AlertCircle size={10} /></span>
+            )}
+          </button>
+        )}
+
+        {(targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT') && (
+          <button 
+            className={`tab-link ${activeTab === 'event_orders' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('event_orders');
+              fetchFoAndClosure();
+            }}
+          >
+            EVENT ORDERS
+            {functionOrders.some(fo => fo.status === 'PENDING_SETTLEMENT') && (
+              <span className="tab-status warning"><AlertCircle size={10} /></span>
+            )}
+          </button>
+        )}
+
+        {(targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT') && (
+          <button 
+            className={`tab-link ${activeTab === 'cash_closure' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('cash_closure');
+              fetchFoAndClosure();
+            }}
+          >
+            CASH CLOSURE
+            {cashClosureData?.submittedForCOO ? (
               <span className="tab-status verified"><CheckCircle2 size={10} /></span>
             ) : (
               <span className="tab-status warning"><AlertCircle size={10} /></span>
@@ -701,9 +817,22 @@ const RevenuePage: React.FC = () => {
                       </tr>
                     );
                   })}
-                  {b2bItems.length === 0 && (
+                  {b2bItems.length === 0 && !localB2bConfirmed && (
                     <tr>
-                      <td colSpan={5} className="empty-row">No dispatches recorded.</td>
+                      <td colSpan={5} style={{padding:0}}>
+                        <div className="empty-tab-warning">
+                          <AlertCircle size={15} />
+                          <span>
+                            <strong>No dispatches planned in System for today.</strong>{' '}
+                            If no dispatches were made, you may still confirm to lock this tab.
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {b2bItems.length === 0 && localB2bConfirmed && (
+                    <tr>
+                      <td colSpan={5} className="empty-row">No dispatches were recorded for this day.</td>
                     </tr>
                   )}
                 </tbody>
@@ -741,50 +870,91 @@ const RevenuePage: React.FC = () => {
             </div>
 
             {/* B2C Cash & Online Reported inputs */}
-            <div className="b2c-reported-inputs-banner">
-              <div className="reported-input-group">
-                <label>TOTAL EXPECTED REVENUE (₹)</label>
-                <div className="reported-value-display">₹ {totalB2C.toFixed(2)}</div>
-              </div>
-              <div className="reported-input-group">
-                <label>TOTAL CASH RECEIVED (₹)</label>
-                {localB2cConfirmed || isReadOnly ? (
-                  <div className="reported-value-display">₹ {reportedCash.toFixed(2)}</div>
-                ) : (
-                  <input
-                    type="number"
-                    value={reportedCash || ''}
-                    onChange={(e) => setReportedCash(parseFloat(e.target.value) || 0)}
-                    placeholder="0.00"
-                    min="0"
-                    step="0.01"
-                    className="reported-input-field"
-                  />
-                )}
-              </div>
-              <div className="reported-input-group">
-                <label>TOTAL ONLINE RECEIVED (₹)</label>
-                {localB2cConfirmed || isReadOnly ? (
-                  <div className="reported-value-display">₹ {reportedOnline.toFixed(2)}</div>
-                ) : (
-                  <input
-                    type="number"
-                    value={reportedOnline || ''}
-                    onChange={(e) => setReportedOnline(parseFloat(e.target.value) || 0)}
-                    placeholder="0.00"
-                    min="0"
-                    step="0.01"
-                    className="reported-input-field"
-                  />
-                )}
-              </div>
-              <div className="reported-input-group difference-group">
-                <label>DIFFERENCE (₹)</label>
-                <div className={`reported-value-display difference ${(totalB2C - (reportedCash + reportedOnline)) !== 0 ? 'mismatch' : 'matched'}`}>
-                  ₹ {(totalB2C - (reportedCash + reportedOnline)).toFixed(2)}
+            {targetUserRole === 'AGGREGATE' ? (
+              <div className="aggregator-receivable-card-grid" style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(5, 1fr)',
+                gap: '16px',
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px solid var(--border-main)',
+                padding: '20px',
+                marginBottom: '24px',
+                alignItems: 'center'
+              }}>
+                <div className="receivable-stat">
+                  <span style={{ display: 'block', fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>Expected Gross Revenue</span>
+                  <strong style={{ fontSize: '1.15rem', color: 'var(--text-main)' }}>₹ {totalB2C.toFixed(2)}</strong>
+                </div>
+                <div className="receivable-stat">
+                  <span style={{ display: 'block', fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>GST Deduction (5% Incl.)</span>
+                  <strong style={{ fontSize: '1.15rem', color: '#ef4444' }}>- ₹ {((totalB2C / 1.05) * 0.05).toFixed(2)}</strong>
+                </div>
+                <div className="receivable-stat">
+                  <span style={{ display: 'block', fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>Commission ({currentUser?.aggregatorPercentage || 0}%)</span>
+                  <strong style={{ fontSize: '1.15rem', color: '#ef4444' }}>- ₹ {(((currentUser?.aggregatorPercentage || 0) / 100) * totalB2C).toFixed(2)}</strong>
+                </div>
+                <div className="receivable-stat">
+                  <span style={{ display: 'block', fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>Daily Expenses</span>
+                  <strong style={{ fontSize: '1.15rem', color: '#ef4444' }}>- ₹ {(cashExpenses.reduce((sum, exp) => sum + (exp.approvedAmount !== undefined ? exp.approvedAmount : exp.amount), 0)).toFixed(2)}</strong>
+                </div>
+                <div className="receivable-stat" style={{ borderLeft: '1px solid var(--border-main)', paddingLeft: '16px' }}>
+                  <span style={{ display: 'block', fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '4px', textTransform: 'uppercase' }}>Net Expected Receivable</span>
+                  <strong style={{ fontSize: '1.25rem', color: '#10b981' }}>
+                    ₹ {(
+                      totalB2C - 
+                      ((totalB2C / 1.05) * 0.05) - 
+                      (((currentUser?.aggregatorPercentage || 0) / 100) * totalB2C) - 
+                      cashExpenses.reduce((sum, exp) => sum + (exp.approvedAmount !== undefined ? exp.approvedAmount : exp.amount), 0)
+                    ).toFixed(2)}
+                  </strong>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="b2c-reported-inputs-banner">
+                <div className="reported-input-group">
+                  <label>TOTAL EXPECTED REVENUE (₹)</label>
+                  <div className="reported-value-display">₹ {totalB2C.toFixed(2)}</div>
+                </div>
+                <div className="reported-input-group">
+                  <label>TOTAL CASH RECEIVED (₹)</label>
+                  {localB2cConfirmed || isReadOnly ? (
+                    <div className="reported-value-display">₹ {reportedCash.toFixed(2)}</div>
+                  ) : (
+                    <input
+                      type="number"
+                      value={reportedCash || ''}
+                      onChange={(e) => setReportedCash(parseFloat(e.target.value) || 0)}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                      className="reported-input-field"
+                    />
+                  )}
+                </div>
+                <div className="reported-input-group">
+                  <label>TOTAL ONLINE RECEIVED (₹)</label>
+                  {localB2cConfirmed || isReadOnly ? (
+                    <div className="reported-value-display">₹ {reportedOnline.toFixed(2)}</div>
+                  ) : (
+                    <input
+                      type="number"
+                      value={reportedOnline || ''}
+                      onChange={(e) => setReportedOnline(parseFloat(e.target.value) || 0)}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                      className="reported-input-field"
+                    />
+                  )}
+                </div>
+                <div className="reported-input-group difference-group">
+                  <label>DIFFERENCE (₹)</label>
+                  <div className={`reported-value-display difference ${(totalB2C - (reportedCash + reportedOnline)) !== 0 ? 'mismatch' : 'matched'}`}>
+                    ₹ {(totalB2C - (reportedCash + reportedOnline)).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="table-wrapper">
               <table className="sharp-table">
@@ -860,9 +1030,22 @@ const RevenuePage: React.FC = () => {
                       <td className="text-right font-numeric">₹ {(item.totalVal || 0).toFixed(2)}</td>
                     </tr>
                   ))}
-                  {b2cItems.length === 0 && (
+                  {b2cItems.length === 0 && !localB2cConfirmed && (
                     <tr>
-                      <td colSpan={7} className="empty-row">No B2C items available.</td>
+                      <td colSpan={7} style={{padding:0}}>
+                        <div className="empty-tab-warning">
+                          <AlertCircle size={15} />
+                          <span>
+                            <strong>No dispatches planned in System for today.</strong>{' '}
+                            No BOM dishes were received and no direct stock is available for this location.
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  {b2cItems.length === 0 && localB2cConfirmed && (
+                    <tr>
+                      <td colSpan={7} className="empty-row">No B2C items were recorded for this day.</td>
                     </tr>
                   )}
                 </tbody>
@@ -933,6 +1116,318 @@ const RevenuePage: React.FC = () => {
                   <Save size={14} /> CONFIRM ONLINE SALES
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ─── EVENT ORDERS TAB ──────────────────────────────────── */}
+        {activeTab === 'event_orders' && (targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT') && (
+          <div className="tab-panel">
+            <div className="panel-header-section">
+              <h3>Event / Party Orders</h3>
+            </div>
+            
+            <div className="table-wrapper">
+              <table className="sharp-table">
+                <thead>
+                  <tr>
+                    <th>ORDER CODE</th>
+                    <th>EVENT DATE</th>
+                    <th>DESCRIPTION</th>
+                    <th>TOTAL VALUE</th>
+                    <th>ADVANCE PAID</th>
+                    <th>PENDING RECEIVABLE</th>
+                    <th>STATUS</th>
+                    <th style={{ textAlign: 'center' }}>ACTION</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {functionOrders.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="empty-row">No function orders found for this location.</td>
+                    </tr>
+                  ) : (
+                    functionOrders.map((fo) => {
+                      const netReceivable = fo.totalOrderValue - fo.advanceAmount - (fo.finalPaymentAmount || 0);
+                      return (
+                        <tr key={fo._id}>
+                          <td><strong>{fo.foCode}</strong></td>
+                          <td>{new Date(fo.eventDate).toLocaleDateString()}</td>
+                          <td>{fo.description}</td>
+                          <td className="font-numeric">₹ {fo.totalOrderValue.toFixed(2)}</td>
+                          <td className="font-numeric">₹ {fo.advanceAmount.toFixed(2)}</td>
+                          <td className="font-numeric" style={{ color: netReceivable > 0 ? '#ef4444' : '#10b981' }}>
+                            ₹ {netReceivable.toFixed(2)}
+                          </td>
+                          <td>
+                            <span className={`status-pill status-${fo.status.toLowerCase().replace('_', '')}`} style={{ fontSize: '0.65rem', padding: '3px 8px' }}>
+                              {fo.status.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {['REQUEST_PLACED', 'DELIVERED', 'PENDING_SETTLEMENT'].includes(fo.status) ? (
+                              <button 
+                                className="btn-primary" 
+                                style={{ padding: '6px 12px', fontSize: '0.65rem' }}
+                                onClick={() => {
+                                  setSettlingFo(fo);
+                                  setSettleForm({
+                                    paymentMode: 'UPI',
+                                    paymentAmount: Math.max(0, fo.totalOrderValue - fo.advanceAmount)
+                                  });
+                                  setSettleModalOpen(true);
+                                }}
+                              >
+                                CONFIRM SETTLEMENT
+                              </button>
+                            ) : fo.status === 'SETTLED' ? (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                                Settled ({fo.finalPaymentMode})
+                              </span>
+                            ) : fo.status === 'CLOSED' ? (
+                              <span style={{ fontSize: '0.72rem', color: '#10b981', fontWeight: 'bold' }}>
+                                Closed & Reconciled
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                                Placed / In Progress
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ─── CASH CLOSURE TAB ──────────────────────────────────── */}
+        {activeTab === 'cash_closure' && (targetUserRole === 'CENTERS' || targetUserRole === 'RESTAURANT') && (
+          <div className="tab-panel">
+            {!localB2cConfirmed && (
+              <div className="empty-tab-warning" style={{ marginBottom: '20px', borderLeftColor: '#ef4444', color: '#ef4444', background: 'rgba(239,68,68,0.06)' }}>
+                <AlertCircle size={15} />
+                <span>
+                  <strong>B2C Counter Sales are unconfirmed!</strong> Please confirm B2C Counter Sales first to compute correct expected cash.
+                </span>
+              </div>
+            )}
+
+            <div className="panel-header-section">
+              <h3>Daily Cash Closure</h3>
+              {cashClosureData?.submittedForCOO && (
+                <span className="badge badge-closed"><Lock size={12} /> SUBMITTED TO COO</span>
+              )}
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' }}>
+              {/* Left Column: Computed Cash Flow Summary */}
+              <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-main)', padding: '20px' }}>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '16px', letterSpacing: '0.5px' }}>
+                  EXPECTED CASH INFLOWS & OUTFLOWS
+                </h4>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(+) Prev Day Cash in Hand</span>
+                    <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>₹ {(cashClosureData?.prevDayCashInHand || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(+) Today's Cash Food Sales</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#10b981' }}>₹ {(cashClosureData?.cashFoodSales || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(+) Event Advance Cash Received</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#10b981' }}>₹ {(cashClosureData?.advancePaymentsReceived || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(+) Event Final Cash Settled</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#10b981' }}>₹ {(cashClosureData?.functionOrderFinalPayments || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(-) Today's Cash Expenses</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#ef4444' }}>₹ {(cashClosureData?.cashExpenses || 0).toFixed(2)}</strong>
+                  </div>
+                  
+                  {/* Expense Breakdowns */}
+                  {cashExpenses.length > 0 && (
+                    <div style={{ paddingLeft: '16px', background: 'rgba(0,0,0,0.1)', padding: '8px 12px', borderLeft: '2px solid var(--border-main)', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' }}>
+                      {cashExpenses.map((exp: any) => (
+                        <div key={exp._id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+                          <span>• {exp.description || exp.category}</span>
+                          <span>₹ {(exp.approvedAmount !== undefined ? exp.approvedAmount : exp.amount).toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(+) Advance Cash Taken</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#10b981' }}>₹ {(cashForm.advanceCashTaken || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '8px' }}>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>(-) Cash to Bank</span>
+                    <strong style={{ fontSize: '0.85rem', color: '#ef4444' }}>₹ {(cashForm.cashDepositedToBank || 0).toFixed(2)}</strong>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '2px solid var(--border-main)', paddingTop: '12px', marginTop: '4px' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-main)' }}>EXPECTED CASH IN HAND</span>
+                    <strong style={{ fontSize: '1.1rem', color: 'var(--primary)' }}>
+                      ₹ {((cashClosureData?.prevDayCashInHand || 0) + (cashClosureData?.cashFoodSales || 0) + (cashClosureData?.advancePaymentsReceived || 0) + (cashClosureData?.functionOrderFinalPayments || 0) - (cashClosureData?.cashExpenses || 0) + (Number(cashForm.advanceCashTaken) || 0) - (Number(cashForm.cashDepositedToBank) || 0)).toFixed(2)}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Manual Entry Fields */}
+              <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border-main)', padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <h4 style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '0.5px' }}>
+                  MANUAL DISBURSEMENTS & CLOSING CASH
+                </h4>
+
+                <div className="standard-form" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Advance Cash Taken (₹)</label>
+                    <input
+                      type="number"
+                      value={cashForm.advanceCashTaken || ''}
+                      onChange={(e) => setCashForm({ ...cashForm, advanceCashTaken: parseFloat(e.target.value) || 0 })}
+                      disabled={cashClosureData?.submittedForCOO || isReadOnly || !localB2cConfirmed}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Cash to Bank (₹)</label>
+                    <input
+                      type="number"
+                      value={cashForm.cashDepositedToBank || ''}
+                      onChange={(e) => setCashForm({ ...cashForm, cashDepositedToBank: parseFloat(e.target.value) || 0 })}
+                      disabled={cashClosureData?.submittedForCOO || isReadOnly || !localB2cConfirmed}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                    />
+                    <p style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '4px', marginBottom: 0 }}>
+                      Fill the amount that will be deposited from Cash to Bank account.
+                    </p>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label>Actual Cash In Hand (₹)</label>
+                    <input
+                      type="number"
+                      value={cashForm.cashInHand || ''}
+                      onChange={(e) => setCashForm({ ...cashForm, cashInHand: parseFloat(e.target.value) || 0 })}
+                      disabled={cashClosureData?.submittedForCOO || isReadOnly || !localB2cConfirmed}
+                      placeholder="0.00"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+
+                {/* Closing computations */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid var(--border-main)', paddingTop: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                    <span>Declared Cash In Hand:</span>
+                    <strong>₹ {(Number(cashForm.cashInHand) || 0).toFixed(2)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                    <span>Computed Expected Cash:</span>
+                    <strong>
+                      ₹ {((cashClosureData?.prevDayCashInHand || 0) + (cashClosureData?.cashFoodSales || 0) + (cashClosureData?.advancePaymentsReceived || 0) + (cashClosureData?.functionOrderFinalPayments || 0) - (cashClosureData?.cashExpenses || 0) + (Number(cashForm.advanceCashTaken) || 0) - (Number(cashForm.cashDepositedToBank) || 0)).toFixed(2)}
+                    </strong>
+                  </div>
+                  
+                  {/* Difference */}
+                  {(() => {
+                    const expected = (cashClosureData?.prevDayCashInHand || 0) + (cashClosureData?.cashFoodSales || 0) + (cashClosureData?.advancePaymentsReceived || 0) + (cashClosureData?.functionOrderFinalPayments || 0) - (cashClosureData?.cashExpenses || 0) + (Number(cashForm.advanceCashTaken) || 0) - (Number(cashForm.cashDepositedToBank) || 0);
+                    const diff = ((Number(cashForm.cashInHand) || 0) - (Number(cashForm.cashDepositedToBank) || 0)) - expected;
+                    return (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', fontWeight: 800, marginTop: '4px' }}>
+                        <span>DIFFERENCE:</span>
+                        <span style={{ color: diff === 0 ? '#10b981' : '#ef4444' }}>
+                          ₹ {diff.toFixed(2)}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Closure actions */}
+                {!cashClosureData?.submittedForCOO && !isReadOnly && localB2cConfirmed && (
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '10px' }}>
+                    <button 
+                      className="btn-confirm-tab" 
+                      style={{ flex: 1, justifySelf: 'stretch', background: 'var(--primary)', justifyContent: 'center' }}
+                      onClick={async () => {
+                        try {
+                          setIsSubmitting(true);
+                          setError('');
+                          const targetLoc = isAdminRole() ? selectedLocationId : undefined;
+                          await revenueApi.saveCashClosure({
+                            date: selectedDate,
+                            data: cashForm,
+                            locationId: targetLoc
+                          });
+                          setSuccess('Cash Closure saved successfully!');
+                          await fetchFoAndClosure();
+                          setTimeout(() => setSuccess(''), 3000);
+                        } catch (err: any) {
+                          setError(err.response?.data?.error || 'Failed to save cash closure');
+                        } finally {
+                          setIsSubmitting(false);
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      <Save size={14} /> SAVE FIGURES
+                    </button>
+                    
+                    <button 
+                      className="btn-confirm-tab" 
+                      style={{ flex: 1, justifySelf: 'stretch', background: '#a855f7', justifyContent: 'center' }}
+                      onClick={async () => {
+                        if (!window.confirm("Are you sure you want to submit today's Cash Closure for COO Approval? This will lock all cash figures!")) {
+                          return;
+                        }
+                        try {
+                          setIsSubmitting(true);
+                          setError('');
+                          const targetLoc = isAdminRole() ? selectedLocationId : undefined;
+                          await revenueApi.submitCashClosure({
+                            date: selectedDate,
+                            locationId: targetLoc
+                          });
+                          setSuccess('Cash Closure submitted for COO approval!');
+                          await fetchFoAndClosure();
+                          const finalLoc = isAdminRole() ? selectedLocationId : currentUser?._id;
+                          if (finalLoc) fetchDailyRevenue(finalLoc, selectedDate);
+                          setTimeout(() => setSuccess(''), 3000);
+                        } catch (err: any) {
+                          setError(err.response?.data?.error || 'Failed to submit cash closure');
+                        } finally {
+                          setIsSubmitting(false);
+                        }
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      SUBMIT FOR APPROVAL
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}
@@ -1165,6 +1660,9 @@ const RevenuePage: React.FC = () => {
         .font-numeric { font-family: monospace; font-weight: 800; font-size: 0.85rem; color: #10b981; }
         .text-right { text-align: right; }
         .empty-row { padding: 40px !important; text-align: center; color: var(--text-dim); }
+        .empty-tab-warning { display: flex; align-items: flex-start; gap: 12px; padding: 16px 20px; background: rgba(245,158,11,0.06); border-left: 3px solid #f59e0b; color: #f59e0b; font-size: 0.82rem; }
+        .empty-tab-warning strong { color: var(--text-main); }
+        .empty-tab-warning svg { flex-shrink: 0; margin-top: 1px; }
 
         .panel-actions { display: flex; justify-content: flex-end; margin-top: 16px; }
         .btn-confirm-tab { background: #10b981; color: white; border: none; padding: 10px 20px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
@@ -1247,7 +1745,126 @@ const RevenuePage: React.FC = () => {
         .reported-value-display.difference.matched {
           color: #10b981;
         }
+
+        /* BUG-R2 — Close Day Confirmation Modal */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 2000; backdrop-filter: blur(6px); }
+        .close-day-modal { background: var(--bg-sidebar); border: 1px solid rgba(239,68,68,0.4); width: 100%; max-width: 480px; padding: 40px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+        .cdm-icon { width: 56px; height: 56px; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); display: flex; align-items: center; justify-content: center; color: #ef4444; }
+        .close-day-modal h2 { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px; color: #ef4444; }
+        .cdm-warning { font-size: 0.85rem; color: var(--text-dim); text-align: center; }
+        .cdm-warning strong { color: var(--text-main); }
+        .cdm-list { list-style: none; padding: 0; width: 100%; background: rgba(239,68,68,0.04); border: 1px solid rgba(239,68,68,0.12); padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
+        .cdm-list li { font-size: 0.8rem; color: var(--text-dim); padding-left: 12px; position: relative; }
+        .cdm-list li::before { content: '▸'; position: absolute; left: 0; color: #ef4444; }
+        .cdm-list li strong { color: var(--text-main); }
+        .cdm-actions { display: flex; gap: 12px; width: 100%; margin-top: 8px; }
+        .btn-cancel-modal { flex: 1; background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 12px; font-size: 0.75rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; }
+        .btn-cancel-modal:hover:not(:disabled) { border-color: var(--text-main); color: var(--text-main); }
+        .btn-confirm-close { flex: 2; background: #ef4444; border: none; color: white; padding: 12px; font-size: 0.75rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; }
+        .btn-confirm-close:hover:not(:disabled) { background: #dc2626; }
+        .btn-confirm-close:disabled { opacity: 0.6; cursor: not-allowed; }
       `}</style>
+
+      {/* Settle Function Order Modal */}
+      {settleModalOpen && settlingFo && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '450px' }}>
+            <button className="close-btn" onClick={() => setSettleModalOpen(false)}><X size={20} /></button>
+            <div className="modal-tag" style={{ color: '#a855f7', border: '1px solid rgba(168,85,247,0.3)', background: 'rgba(168,85,247,0.06)' }}>
+              <DollarSign size={12} /> SETTLE FUNCTION ORDER
+            </div>
+            <h2>Confirm Party Settlement</h2>
+            {error && <div className="error-message">{error}</div>}
+
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px', marginBottom: '16px', fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>Order:</span> <strong>{settlingFo.foCode}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>Total Value:</span> <strong>₹ {settlingFo.totalOrderValue.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span>Advance Paid:</span> <strong>₹ {settlingFo.advanceAmount.toFixed(2)}</strong>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-main)', paddingTop: '6px', marginTop: '6px', color: 'var(--text-main)' }}>
+                  <span>Net Receivable:</span> <strong>₹ {(settlingFo.totalOrderValue - settlingFo.advanceAmount).toFixed(2)}</strong>
+                </div>
+              </div>
+
+              <div className="standard-form">
+                <div className="form-group">
+                  <label>Payment Mode</label>
+                  <select
+                    value={settleForm.paymentMode}
+                    onChange={(e) => setSettleForm({ ...settleForm, paymentMode: e.target.value as any })}
+                  >
+                    <option value="Cash" disabled={revenueRecord?.cashClosure?.submittedForCOO === true}>
+                      Cash {revenueRecord?.cashClosure?.submittedForCOO === true ? '(Disabled - Cash Closure Submitted)' : ''}
+                    </option>
+                    <option value="UPI">UPI</option>
+                    <option value="Card">Card</option>
+                    <option value="Bank Transfer">Bank Transfer</option>
+                  </select>
+                </div>
+
+                {revenueRecord?.cashClosure?.submittedForCOO === true && settleForm.paymentMode === 'Cash' && (
+                  <div className="error-message" style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.2)', color: '#ef4444', padding: '10px', fontSize: '0.72rem', marginTop: '-8px', marginBottom: '12px' }}>
+                    ⚠️ Today's Cash Closure has already been submitted to the COO. You cannot choose Cash payment for settlement. Please select another mode.
+                  </div>
+                )}
+
+                <div className="form-group">
+                  <label>Payment Amount Received (₹)</label>
+                  <input
+                    type="number"
+                    value={settleForm.paymentAmount || ''}
+                    onChange={(e) => setSettleForm({ ...settleForm, paymentAmount: parseFloat(e.target.value) || 0 })}
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="cdm-actions">
+              <button className="btn-cancel-modal" onClick={() => setSettleModalOpen(false)} disabled={isSubmitting}>
+                <X size={14} /> CANCEL
+              </button>
+              <button 
+                className="btn-confirm-close" 
+                style={{ background: '#a855f7' }} 
+                onClick={async () => {
+                  if (settleForm.paymentMode === 'Cash' && revenueRecord?.cashClosure?.submittedForCOO === true) {
+                    setError("Cash Closure is already submitted. Cash settlement is blocked.");
+                    return;
+                  }
+                  setIsSubmitting(true);
+                  setError('');
+                  try {
+                    await functionOrderApi.settle(settlingFo._id, settleForm);
+                    setSuccess('Function order settled successfully!');
+                    setSettleModalOpen(false);
+                    await fetchFoAndClosure();
+                    const finalLoc = isAdminRole() ? selectedLocationId : currentUser?._id;
+                    if (finalLoc) fetchDailyRevenue(finalLoc, selectedDate);
+                    setTimeout(() => setSuccess(''), 3000);
+                  } catch (err: any) {
+                    setError(err.response?.data?.error || 'Failed to settle order');
+                  } finally {
+                    setIsSubmitting(false);
+                  }
+                }} 
+                disabled={isSubmitting || (settleForm.paymentMode === 'Cash' && revenueRecord?.cashClosure?.submittedForCOO === true)}
+              >
+                {isSubmitting ? <Loader2 size={14} className="spin" /> : <DollarSign size={14} />}
+                {isSubmitting ? 'SETTLING...' : 'CONFIRM SETTLEMENT'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </MainLayout>
   );
 };

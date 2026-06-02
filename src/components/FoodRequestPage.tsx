@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { foodRequestApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
@@ -65,13 +65,17 @@ const FoodRequestPage: React.FC = () => {
   const [cooActiveTab, setCooActiveTab] = useState<'OPEN' | 'APPROVED'>('OPEN');
   const [cooExpandedGroups, setCooExpandedGroups] = useState<Record<string, boolean>>({});
 
+  const { search } = useLocation();
+  const queryParams = new URLSearchParams(search);
+  const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
+
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
   // Roles that submit requests (see their own cards view)
   const isCenter = user?.role === 'CENTERS' || user?.role === 'RESTAURANT' || user?.role === 'AGGREGATE';
-  const isCOO = user?.role === 'COO';
+  const isCOO = user?.role === 'COO' && !isViewOnly;
   // COO has the same consolidated view as Store Manager
-  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
+  const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO' || isViewOnly;
 
   useEffect(() => {
     fetchRequests();
@@ -184,6 +188,7 @@ const FoodRequestPage: React.FC = () => {
             requestedQty: item.requestedQty,
             unit: item.unit,
             approvalStatus: status,
+            functionOrderId: req.functionOrderId
           });
         });
       });
@@ -348,7 +353,7 @@ const FoodRequestPage: React.FC = () => {
             <div className="consolidated-panel">
 
               {/* ====== COO SECTION A: Food Request Approval Table ====== */}
-              {isCOO && (
+              {(isCOO || isViewOnly) && (
                 <div className="coo-approval-panel">
                   {/* Tabs header */}
                   <div className="coo-tabs" style={{ display: 'flex', gap: '16px', marginBottom: '20px', borderBottom: '1px solid var(--border-main)' }}>
@@ -407,7 +412,7 @@ const FoodRequestPage: React.FC = () => {
                           })()}
                         </select>
                       </div>
-                      {cooActiveTab === 'OPEN' && (
+                      {cooActiveTab === 'OPEN' && !isViewOnly && (
                         <>
                           <button
                             className="btn-approve"
@@ -445,17 +450,19 @@ const FoodRequestPage: React.FC = () => {
                             <th>EDIT QTY</th>
                             <th>STATUS</th>
                             <th style={{ textAlign: 'center' }}>
-                              <input
-                                type="checkbox"
-                                onChange={e => {
-                                  const all: Record<string, boolean> = {};
-                                  getCooRows().forEach((row: any) => {
-                                    all[`${row.requestId}_${row.itemId}`] = e.target.checked;
-                                  });
-                                  setCooSelectedItems(all);
-                                }}
-                                style={{ transform: 'scale(1.2)' }}
-                              />
+                              {!isViewOnly && (
+                                <input
+                                  type="checkbox"
+                                  onChange={e => {
+                                    const all: Record<string, boolean> = {};
+                                    getCooRows().forEach((row: any) => {
+                                      all[`${row.requestId}_${row.itemId}`] = e.target.checked;
+                                    });
+                                    setCooSelectedItems(all);
+                                  }}
+                                  style={{ transform: 'scale(1.2)' }}
+                                />
+                              )}
                             </th>
                           </tr>
                         </thead>
@@ -469,38 +476,51 @@ const FoodRequestPage: React.FC = () => {
                               return (
                                 <tr key={rowKey} className={row.approvalStatus === 'REJECTED' ? 'row-rejected' : row.approvalStatus === 'APPROVED' ? 'row-approved' : ''}>
                                   <td>{idx + 1}</td>
-                                  <td><strong>{row.centerName}</strong></td>
+                                  <td>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                      <strong>{row.centerName}</strong>
+                                      {row.functionOrderId && (
+                                        <span className="status-pill status-pending" style={{ alignSelf: 'flex-start', fontSize: '0.55rem', padding: '2px 6px', background: 'rgba(139,92,246,0.15)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.3)', fontWeight: 900, borderRadius: '2px' }}>
+                                          FUNCTION ORDER
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
                                   <td>{row.materialName}</td>
                                   <td><span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{row.isMenuItem ? 'DISH' : 'RAW'}</span></td>
                                   <td>{row.requestedQty} {row.unit}</td>
                                   <td>
-                                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                                      <input
-                                        type="number"
-                                        value={editQty}
-                                        min={0}
-                                        onChange={e => setCooEditQtys({ ...cooEditQtys, [rowKey]: Number(e.target.value) })}
-                                        style={{ width: '70px', padding: '5px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
-                                      />
-                                      <button
-                                        className="btn-refresh"
-                                        disabled={cooSavingKey === rowKey || editQty === row.requestedQty}
-                                        onClick={async () => {
-                                          setCooSavingKey(rowKey);
-                                          try {
-                                            await foodRequestApi.updateItemQty(row.requestId, row.itemId, editQty);
-                                            showToast('Quantity updated', 'success');
-                                            fetchRequests();
-                                          } catch (err: any) {
-                                            showToast(err.response?.data?.error || 'Update failed', 'error');
-                                          } finally {
-                                            setCooSavingKey(null);
-                                          }
-                                        }}
-                                      >
-                                        {cooSavingKey === rowKey ? <RefreshCw size={12} className="spinning" /> : <Save size={12} />}
-                                      </button>
-                                    </div>
+                                    {isViewOnly ? (
+                                      <span>{row.requestedQty} {row.unit}</span>
+                                    ) : (
+                                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                        <input
+                                          type="number"
+                                          value={editQty}
+                                          min={0}
+                                          onChange={e => setCooEditQtys({ ...cooEditQtys, [rowKey]: Number(e.target.value) })}
+                                          style={{ width: '70px', padding: '5px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
+                                        />
+                                        <button
+                                          className="btn-refresh"
+                                          disabled={cooSavingKey === rowKey || editQty === row.requestedQty}
+                                          onClick={async () => {
+                                            setCooSavingKey(rowKey);
+                                            try {
+                                              await foodRequestApi.updateItemQty(row.requestId, row.itemId, editQty);
+                                              showToast('Quantity updated', 'success');
+                                              fetchRequests();
+                                            } catch (err: any) {
+                                              showToast(err.response?.data?.error || 'Update failed', 'error');
+                                            } finally {
+                                              setCooSavingKey(null);
+                                            }
+                                          }}
+                                        >
+                                          {cooSavingKey === rowKey ? <RefreshCw size={12} className="spinning" /> : <Save size={12} />}
+                                        </button>
+                                      </div>
+                                    )}
                                   </td>
                                   <td>
                                     <span className={`status-pill status-${row.approvalStatus.toLowerCase()}`}>
@@ -508,7 +528,7 @@ const FoodRequestPage: React.FC = () => {
                                     </span>
                                   </td>
                                   <td style={{ textAlign: 'center' }}>
-                                    {row.approvalStatus === 'PENDING' && (
+                                    {!isViewOnly && row.approvalStatus === 'PENDING' && (
                                       <input
                                         type="checkbox"
                                         checked={!!cooSelectedItems[rowKey]}
@@ -596,7 +616,7 @@ const FoodRequestPage: React.FC = () => {
                                                   <td><code>{item.simpleCode}</code></td>
                                                   <td><strong>{item.requestedQty} {item.unit}</strong></td>
                                                   <td>
-                                                    {item.approvalStatus === 'APPROVED' ? (
+                                                    {item.approvalStatus === 'APPROVED' && !isViewOnly ? (
                                                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                                                         <input
                                                           type="number"
@@ -625,7 +645,9 @@ const FoodRequestPage: React.FC = () => {
                                                         </button>
                                                       </div>
                                                     ) : (
-                                                      <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>N/A (REJECTED)</span>
+                                                      <span style={{ color: 'var(--text-dim)', fontSize: '0.75rem' }}>
+                                                        {item.approvalStatus === 'APPROVED' ? `${item.requestedQty} ${item.unit}` : 'N/A (REJECTED)'}
+                                                      </span>
                                                     )}
                                                   </td>
                                                   <td>
@@ -679,12 +701,17 @@ const FoodRequestPage: React.FC = () => {
                             {req.status}
                           </div>
                           <div className="fr-center-info">
-                            <span className="fr-meta">
+                            <span className="fr-meta" style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                               <strong className="item-count-badge">{req.requestedItems.length} ITEMS</strong> ·
                               {new Date(req.createdAt).toLocaleDateString()} ·&nbsp;
                               <strong style={{ color: 'var(--primary)' }}>
                                 DELIVERY: {req.deliveryDate ? new Date(req.deliveryDate).toLocaleDateString() : 'TBD'}
                               </strong>
+                              {req.functionOrderId && (
+                                <span className="status-pill status-pending" style={{ fontSize: '0.55rem', padding: '2px 6px', background: 'rgba(139,92,246,0.15)', color: '#8b5cf6', border: '1px solid rgba(139,92,246,0.3)', fontWeight: 900, borderRadius: '2px' }}>
+                                  FUNCTION ORDER
+                                </span>
+                              )}
                             </span>
                           </div>
                         </div>

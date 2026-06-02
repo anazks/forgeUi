@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
@@ -11,10 +11,14 @@ import {
 
 const PurchasePage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
+  const { search } = useLocation();
+  const queryParams = new URLSearchParams(search);
   
   // User context
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
+  const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
+
   const isAdmin = user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN';
   const isStore = user?.role === 'STORE';
   const isLocationUser = ['STORE', 'CENTERS', 'RESTAURANT', 'RESORT', 'AGGREGATE', 'KITCHEN'].includes(user?.role);
@@ -340,12 +344,12 @@ const PurchasePage: React.FC = () => {
           <p className="subtitle">Accept deliveries and update inventory</p>
         </div>
         <div className="header-actions" style={{ display: 'flex', gap: '10px' }}>
-          {isStore && activeTab === 'VENDOR' && (
+          {isStore && activeTab === 'VENDOR' && !isViewOnly && (
             <button className="btn-primary" onClick={() => setShowRequestModal(true)}>
               <Plus size={16} /> NEW PURCHASE REQUEST
             </button>
           )}
-          {isLocationUser && activeTab === 'VENDOR' && (
+          {isLocationUser && activeTab === 'VENDOR' && !isViewOnly && (
             <button className="btn-secondary" onClick={() => setShowExpenseModal(true)}>
               <Plus size={16} /> ADD EXPENSE
             </button>
@@ -371,7 +375,7 @@ const PurchasePage: React.FC = () => {
       <div className="data-panel">
         {isLoading ? <ForgeLoader /> : activeTab === 'VENDOR' ? (
           <div className="table-wrapper">
-            {isStore && (
+            {(isStore || user?.role === 'ADMIN' || user?.role === 'COO' || isViewOnly) && (
               <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', gap: '16px', alignItems: 'center' }}>
                 <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
                 <select 
@@ -443,7 +447,7 @@ const PurchasePage: React.FC = () => {
                             >
                               <Package size={14} /> OPEN
                             </button>
-                            {(isStore || isAdmin) && bill.deliveryStatus === 'DELIVERED' && bill.paymentStatus !== 'PAID' && (
+                            {(isAdmin || user?.role === 'FINANCE' || user?.role === 'COO') && bill.deliveryStatus === 'DELIVERED' && bill.paymentStatus !== 'PAID' && !isViewOnly && (
                               <button 
                                 className="btn-action-sm received" 
                                 onClick={() => handleUpdateBillDirect(bill._id, { paymentStatus: 'PAID' })}
@@ -844,7 +848,8 @@ const PurchasePage: React.FC = () => {
                               type="checkbox"
                               checked={selectedForReceive[i._id] || false}
                               onChange={(e) => setSelectedForReceive({...selectedForReceive, [i._id]: e.target.checked})}
-                              style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                              disabled={isViewOnly}
+                              style={{ transform: 'scale(1.2)', cursor: isViewOnly ? 'not-allowed' : 'pointer' }}
                             />
                           </td>
                         )}
@@ -855,7 +860,7 @@ const PurchasePage: React.FC = () => {
                             type="number"
                             value={receiveForm[idKey] ?? maxQty}
                             onChange={(e) => setReceiveForm({...receiveForm, [idKey]: Number(e.target.value)})}
-                            disabled={(activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED'}
+                            disabled={(activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly}
                             style={{ 
                               width: '80px', 
                               padding: '6px', 
@@ -863,7 +868,7 @@ const PurchasePage: React.FC = () => {
                               border: '1px solid var(--border-main)', 
                               color: 'var(--text-main)', 
                               outline: 'none',
-                              opacity: ((activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED') ? 0.5 : 1
+                              opacity: ((activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly) ? 0.5 : 1
                             }}
                           />
                         </td>
@@ -874,7 +879,7 @@ const PurchasePage: React.FC = () => {
               </table>
             </div>
             <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              {selectedBill.deliveryStatus === 'DELIVERED' ? (
+              {selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly ? (
                 <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CLOSE</button>
               ) : (
                 <>
@@ -1040,7 +1045,7 @@ const PurchasePage: React.FC = () => {
                     onChange={e => setExpenseForm(prev => ({ ...prev, paymentMethod: e.target.value }))}
                     required
                   >
-                    {['Cash', 'UPI', 'Card', 'Bank Transfer'].map(m => (
+                    {['Cash'].map(m => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>

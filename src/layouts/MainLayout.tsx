@@ -11,24 +11,22 @@ import {
   Flame,
   MenuSquare,
   ClipboardList,
-  Store,
   ChefHat,
   ShoppingBag,
-  Palmtree,
-  Network,
   Settings2,
   Package,
   UtensilsCrossed,
   Database,
   CreditCard,
-  Trash2,
-  Banknote,
   TrendingDown,
   DollarSign,
-  Landmark
+  Landmark,
+  Calendar,
+  Plus,
+  Layers
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
-import { userApi } from '../services/api';
+import { userApi, employeeApi } from '../services/api';
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -39,13 +37,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const [financeLocations, setFinanceLocations] = useState<any[]>([]);
+  const [hrYears, setHrYears] = useState<any[]>([]);
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
 
   useEffect(() => {
+    const entityId = user?.entity?._id || user?.entity;
     if (user?.role === 'FINANCE') {
-      const entityId = user.entity?._id || user.entity;
       userApi.getLocations(entityId)
         .then(res => {
           const allLocs = res.data.data || [];
@@ -55,6 +54,12 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           setFinanceLocations(saleLocs);
         })
         .catch(err => console.error('Failed to load locations in sidebar', err));
+    } else if (user?.role === 'HR' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') {
+      employeeApi.getYearViews(entityId)
+        .then(res => {
+          setHrYears(res.data.data || []);
+        })
+        .catch(err => console.error('Failed to load HR year views in sidebar', err));
     }
   }, [user?.role]);
 
@@ -77,6 +82,17 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
     return location.pathname === globalPath;
   };
 
+  const isActiveWithQuery = (path: string, requireViewOnly: boolean) => {
+    const searchParams = new URLSearchParams(location.search);
+    const hasViewOnly = searchParams.get('viewOnly') === 'true';
+    let pathMatches = location.pathname === path;
+    if (activeEntityId) {
+      const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+      pathMatches = location.pathname === `/entity/${activeEntityId}/${cleanPath}`;
+    }
+    return pathMatches && (hasViewOnly === requireViewOnly);
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -93,11 +109,450 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
   const isCOO = user?.role === 'COO';
   const isResort = user?.role === 'RESORT';
   const isFinance = user?.role === 'FINANCE';
+  const isHR = user?.role === 'HR';
   const isCenters = user?.role === 'CENTERS' || user?.role === 'KITCHEN' || user?.role === 'RESTAURANT' || user?.role === 'AGGREGATE';
 
+  const handleAddYearView = async () => {
+    const yearStr = prompt('Enter Calendar Year (e.g., 2026):');
+    if (!yearStr) return;
+    const yearNum = parseInt(yearStr);
+    if (isNaN(yearNum) || yearNum < 2000 || yearNum > 2100) {
+      alert('Please enter a valid 4-digit calendar year.');
+      return;
+    }
+
+    try {
+      const entityId = user?.entity?._id || user?.entity;
+      await employeeApi.addYearView({ year: yearNum, entity: entityId });
+      // Refresh list
+      const res = await employeeApi.getYearViews(entityId);
+      setHrYears(res.data.data || []);
+      // Navigate to the newly created year view
+      navTo(`/hr/year-view/${yearNum}`, `hr/year-view/${yearNum}`);
+    } catch (err: any) {
+      alert(err.response?.data?.error || 'Failed to add year view');
+    }
+  };
+
   const searchParams = new URLSearchParams(location.search);
-  const activeTabQuery = searchParams.get('tab') || 'dashboard';
+  const activeTabQuery = searchParams.get('tab') || 'location';
   const activeLocIdQuery = searchParams.get('locationId') || '';
+
+  const renderSidebar = () => {
+    if (isResort) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">Resort Manager</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                <LayoutDashboard size={18} /><span>Dashboard</span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/finance' ? 'active' : ''}`} onClick={() => navigate('/finance')}>
+                <DollarSign size={18} /><span>Finance</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isFinance) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">Stock Payments</p>
+            <nav className="sidebar-nav">
+              <button 
+                className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'stock_purchases' ? 'active' : ''}`} 
+                onClick={() => navigate('/finance?tab=stock_purchases')}
+              >
+                <DollarSign size={18} /><span>Stock Purchases</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">Sales Reconciliation</p>
+            <nav className="sidebar-nav">
+              {financeLocations.map(loc => (
+                <button 
+                  key={loc._id}
+                  className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'location' && activeLocIdQuery === loc._id ? 'active' : ''}`} 
+                  onClick={() => navigate(`/finance?tab=location&locationId=${loc._id}`)}
+                >
+                  <Building2 size={18} /><span>{loc.name.toUpperCase()}</span>
+                </button>
+              ))}
+              {financeLocations.length === 0 && (
+                <div style={{ padding: '8px 12px', fontSize: '0.75rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>
+                  No sale locations
+                </div>
+              )}
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isStore) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">Store Manager</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/store-dashboard' ? 'active' : ''}`} onClick={() => navigate('/store-dashboard')}>
+                <Package size={18} /><span>Stock Dashboard</span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`} onClick={() => navigate('/store-requests')}>
+                <UtensilsCrossed size={18} /><span>Stock Requests</span>
+                <span className="nav-notification-dot"></span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
+                <Package size={18} /><span>Inventory</span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
+                <ShoppingBag size={18} /><span>New Purchase</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/vendors') ? 'active' : ''}`} onClick={() => navigate('/master-database/vendors')}>
+                <Database size={18} /><span>Vendor Database</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isSuperAdmin) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">Administration</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                <LayoutDashboard size={18} /><span>Dashboard</span>
+              </button>
+            </nav>
+          </div>
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isCOO) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                <LayoutDashboard size={18} /><span>Dashboard</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">Approvals</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${isActiveWithQuery('/food-requests', false) ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
+                <Package size={18} /><span>Food Requests</span>
+                <span className="nav-notification-dot"></span>
+              </button>
+              <button className={`nav-item ${isActiveWithQuery('/store-requests', false) ? 'active' : ''}`} onClick={() => navTo('/store-requests', 'store-requests')}>
+                <UtensilsCrossed size={18} /><span>Stock Requests</span>
+                <span className="nav-notification-dot"></span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/expense-approvals' ? 'active' : ''}`} onClick={() => navigate('/expense-approvals')}>
+                <DollarSign size={18} /><span>Finance Approval</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section" style={{ margin: '12px -12px 12px', padding: '0 0 12px', borderBottom: '1px solid var(--border-main)' }}>
+            <p className="section-title" style={{ fontSize: '0.65rem', paddingLeft: '20px', marginBottom: '8px' }}>Master Database</p>
+            <nav className="sidebar-nav" style={{ paddingLeft: '8px' }}>
+              <button className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`} onClick={() => navTo('/users', 'users')}>
+                <Users size={16} /><span>Users</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/vendors') ? 'active' : ''}`} onClick={() => navTo('/master-database/vendors', 'master-database/vendors')}>
+                <Building2 size={16} /><span>Vendors</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/banks') ? 'active' : ''}`} onClick={() => navTo('/master-database/banks', 'master-database/banks')}>
+                <Landmark size={16} /><span>Banks</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/employees') ? 'active' : ''}`} onClick={() => navTo('/master-database/employees', 'master-database/employees')}>
+                <Users size={16} /><span>Employees</span>
+              </button>
+              <button className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`} onClick={() => navTo('/item-config', 'item-config')}>
+                <Settings2 size={16} /><span>Raw Materials</span>
+              </button>
+              <button className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`} onClick={() => navTo('/bom', 'bom')}>
+                <ClipboardList size={16} /><span>BOM</span>
+              </button>
+              <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
+                <MenuSquare size={16} /><span>Menu</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/special-days') ? 'active' : ''}`} onClick={() => navTo('/master-database/special-days', 'master-database/special-days')}>
+                <Calendar size={16} /><span>Special Days</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/expenses') ? 'active' : ''}`} onClick={() => navTo('/master-database/expenses', 'master-database/expenses')}>
+                <Layers size={16} /><span>Expenses</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">Operational Data</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${isActiveWithQuery('/food-requests', true) ? 'active' : ''}`} onClick={() => navTo('/food-requests?viewOnly=true', 'food-requests?viewOnly=true')}>
+                <Package size={18} /><span>Food Requests</span>
+              </button>
+              <button className={`nav-item ${isActiveWithQuery('/store-requests', true) ? 'active' : ''}`} onClick={() => navTo('/store-requests?viewOnly=true', 'store-requests?viewOnly=true')}>
+                <UtensilsCrossed size={18} /><span>Stock Requests</span>
+              </button>
+              <button className={`nav-item ${isActive('/function-bookings', 'function-bookings') ? 'active' : ''}`} onClick={() => navTo('/function-bookings?viewOnly=true', 'function-bookings?viewOnly=true')}>
+                <ClipboardList size={18} /><span>Function Bookings</span>
+              </button>
+              <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory?viewOnly=true', 'inventory?viewOnly=true')}>
+                <Package size={18} /><span>Inventory</span>
+              </button>
+              <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase?viewOnly=true', 'purchase?viewOnly=true')}>
+                <ShoppingBag size={18} /><span>Purchase</span>
+              </button>
+              <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production?viewOnly=true', 'production?viewOnly=true')}>
+                <ChefHat size={18} /><span>Production</span>
+              </button>
+              <button className={`nav-item ${isActive('/payment-settings', 'payment-settings') ? 'active' : ''}`} onClick={() => navTo('/payment-settings', 'payment-settings')}>
+                <CreditCard size={18} /><span>Pricing Console</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isPartner) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">Partner</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                <LayoutDashboard size={18} /><span>Dashboard</span>
+              </button>
+            </nav>
+          </div>
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    if (isHR) {
+      return (
+        <div className="sidebar-scrollable">
+          <div className="sidebar-section">
+            <p className="section-title">HR Management</p>
+            <nav className="sidebar-nav">
+              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+                <LayoutDashboard size={18} /><span>HR Dashboard</span>
+              </button>
+              <button className={`nav-item ${location.pathname.includes('/master-database/employees') ? 'active' : ''}`} onClick={() => navTo('/master-database/employees', 'master-database/employees')}>
+                <Users size={18} /><span>Employee Master</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">Calendar Year Views</p>
+            <nav className="sidebar-nav">
+              {hrYears.map(y => (
+                <button 
+                  key={y._id}
+                  className={`nav-item ${location.pathname.includes(`/hr/year-view/${y.year}`) ? 'active' : ''}`} 
+                  onClick={() => navTo(`/hr/year-view/${y.year}`, `hr/year-view/${y.year}`)}
+                >
+                  <Calendar size={18} /><span>{y.year} Console</span>
+                </button>
+              ))}
+              
+              <button className="nav-item" onClick={handleAddYearView} style={{ color: 'var(--primary)', fontWeight: 'bold' }}>
+                <Plus size={18} /><span>Add Year View</span>
+              </button>
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        </div>
+      );
+    }
+
+    // Default corporate / ADMIN roles
+    return (
+      <div className="sidebar-scrollable">
+        <div className="sidebar-section">
+          <nav className="sidebar-nav">
+            <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
+              <LayoutDashboard size={18} /><span>Dashboard</span>
+            </button>
+            {isCenters && (
+              <>
+                <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
+                  <MenuSquare size={18} /><span>Menu</span>
+                </button>
+                {user?.role !== 'AGGREGATE' && (
+                  <button className={`nav-item ${isActive('/function-bookings', 'function-bookings') ? 'active' : ''}`} onClick={() => navTo('/function-bookings', 'function-bookings')}>
+                    <ClipboardList size={18} /><span>Function Bookings</span>
+                  </button>
+                )}
+                <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
+                  <UtensilsCrossed size={18} /><span>My Requests</span>
+                </button>
+                <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
+                  <Package size={18} /><span>Inventory</span>
+                </button>
+                <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production', 'production')}>
+                  <ChefHat size={18} /><span>Production</span>
+                </button>
+                <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
+                  <ShoppingBag size={18} /><span>Purchases</span>
+                </button>
+                <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
+                  <TrendingDown size={18} /><span>Wastage Management</span>
+                </button>
+                <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
+                  <DollarSign size={18} /><span>Revenue Console</span>
+                </button>
+                <button className={`nav-item ${isActive('/pricing', 'pricing') ? 'active' : ''}`} onClick={() => navTo('/pricing', 'pricing')}>
+                  <CreditCard size={18} /><span>Pricing Rates</span>
+                </button>
+              </>
+            )}
+          </nav>
+        </div>
+
+        {!isCenters && (
+          <>
+            <div className="sidebar-section" style={{ margin: '12px -12px 12px', padding: '0 0 12px', borderBottom: '1px solid var(--border-main)' }}>
+              <p className="section-title" style={{ fontSize: '0.65rem', paddingLeft: '20px', marginBottom: '8px' }}>Master Database</p>
+              <nav className="sidebar-nav" style={{ paddingLeft: '8px' }}>
+                <button className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`} onClick={() => navTo('/users', 'users')}>
+                  <Users size={16} /><span>Users</span>
+                </button>
+                <button className={`nav-item ${location.pathname.includes('/master-database/vendors') ? 'active' : ''}`} onClick={() => navTo('/master-database/vendors', 'master-database/vendors')}>
+                  <Building2 size={16} /><span>Vendors</span>
+                </button>
+                <button className={`nav-item ${location.pathname.includes('/master-database/banks') ? 'active' : ''}`} onClick={() => navTo('/master-database/banks', 'master-database/banks')}>
+                  <Landmark size={16} /><span>Banks</span>
+                </button>
+                <button className={`nav-item ${location.pathname.includes('/master-database/employees') ? 'active' : ''}`} onClick={() => navTo('/master-database/employees', 'master-database/employees')}>
+                  <Users size={16} /><span>Employees</span>
+                </button>
+                <button className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`} onClick={() => navTo('/item-config', 'item-config')}>
+                  <Settings2 size={16} /><span>Raw Materials</span>
+                </button>
+                <button className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`} onClick={() => navTo('/bom', 'bom')}>
+                  <ClipboardList size={16} /><span>BOM</span>
+                </button>
+                <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
+                  <MenuSquare size={16} /><span>Menu</span>
+                </button>
+                <button className={`nav-item ${location.pathname.includes('/master-database/special-days') ? 'active' : ''}`} onClick={() => navTo('/master-database/special-days', 'master-database/special-days')}>
+                  <Calendar size={16} /><span>Special Days</span>
+                </button>
+                <button className={`nav-item ${location.pathname.includes('/master-database/expenses') ? 'active' : ''}`} onClick={() => navTo('/master-database/expenses', 'master-database/expenses')}>
+                  <Layers size={16} /><span>Expenses</span>
+                </button>
+              </nav>
+            </div>
+
+            <div className="sidebar-section">
+              <p className="section-title">Operational Data</p>
+              <nav className="sidebar-nav">
+                <button className={`nav-item ${isActiveWithQuery('/food-requests', true) ? 'active' : ''}`} onClick={() => navTo('/food-requests?viewOnly=true', 'food-requests?viewOnly=true')}>
+                  <Package size={18} /><span>Food Requests</span>
+                </button>
+                <button className={`nav-item ${isActiveWithQuery('/store-requests', true) ? 'active' : ''}`} onClick={() => navTo('/store-requests?viewOnly=true', 'store-requests?viewOnly=true')}>
+                  <UtensilsCrossed size={18} /><span>Stock Requests</span>
+                </button>
+                <button className={`nav-item ${isActive('/function-bookings', 'function-bookings') ? 'active' : ''}`} onClick={() => navTo('/function-bookings?viewOnly=true', 'function-bookings?viewOnly=true')}>
+                  <ClipboardList size={18} /><span>Function Bookings</span>
+                </button>
+                <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory?viewOnly=true', 'inventory?viewOnly=true')}>
+                  <Package size={18} /><span>Inventory</span>
+                </button>
+                <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase?viewOnly=true', 'purchase?viewOnly=true')}>
+                  <ShoppingBag size={18} /><span>Purchase</span>
+                </button>
+                <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production?viewOnly=true', 'production?viewOnly=true')}>
+                  <ChefHat size={18} /><span>Production</span>
+                </button>
+                <button className={`nav-item ${isActive('/payment-settings', 'payment-settings') ? 'active' : ''}`} onClick={() => navTo('/payment-settings', 'payment-settings')}>
+                  <CreditCard size={18} /><span>Pricing Console</span>
+                </button>
+              </nav>
+            </div>
+          </>
+        )}
+
+        {user?.role !== 'CENTERS' && (
+          <div className="sidebar-section">
+            <p className="section-title">System</p>
+            <nav className="sidebar-nav">
+              <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
+              <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
+                {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
+                <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
+              </button>
+            </nav>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="dashboard-layout">
@@ -118,303 +573,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           )}
         </div>
         
-        {/* RESORT role: minimal sidebar */}
-        {isResort ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">Resort Manager</p>
-              <nav className="sidebar-nav">
-                <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
-                  <LayoutDashboard size={18} /><span>Dashboard</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/finance' ? 'active' : ''}`} onClick={() => navigate('/finance')}>
-                  <DollarSign size={18} /><span>Finance</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* FINANCE role: minimal sidebar */
-        ) : isFinance ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">Finance Manager</p>
-              <nav className="sidebar-nav">
-                <button 
-                  className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'dashboard' ? 'active' : ''}`} 
-                  onClick={() => navigate('/finance?tab=dashboard')}
-                >
-                  <LayoutDashboard size={18} /><span>Dashboard</span>
-                </button>
-                <button 
-                  className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'banks' ? 'active' : ''}`} 
-                  onClick={() => navigate('/finance?tab=banks')}
-                >
-                  <Landmark size={18} /><span>Bank Database</span>
-                </button>
-              </nav>
-            </div>
-
-            <div className="sidebar-section">
-              <p className="section-title">Locations</p>
-              <nav className="sidebar-nav">
-                {financeLocations.map(loc => (
-                  <button 
-                    key={loc._id}
-                    className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'location' && activeLocIdQuery === loc._id ? 'active' : ''}`} 
-                    onClick={() => navigate(`/finance?tab=location&locationId=${loc._id}`)}
-                  >
-                    <Building2 size={18} /><span>{loc.name.toUpperCase()}</span>
-                  </button>
-                ))}
-                {financeLocations.length === 0 && (
-                  <div style={{ padding: '8px 12px', fontSize: '0.75rem', color: 'var(--text-dim)', fontStyle: 'italic' }}>
-                    No sale locations
-                  </div>
-                )}
-              </nav>
-            </div>
-
-            <div className="sidebar-section">
-              <p className="section-title">System</p>
-              <nav className="sidebar-nav">
-                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* STORE role: minimal sidebar */
-        ) : isStore ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">Store Manager</p>
-              <nav className="sidebar-nav">
-                <button className={`nav-item ${location.pathname === '/store-dashboard' ? 'active' : ''}`} onClick={() => navigate('/store-dashboard')}>
-                  <Package size={18} /><span>Stock Dashboard</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`} onClick={() => navigate('/store-requests')}>
-                  <UtensilsCrossed size={18} /><span>Stock Requests</span>
-                  <span className="nav-notification-dot"></span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
-                  <Package size={18} /><span>Inventory</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
-                  <ShoppingBag size={18} /><span>New Purchase</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/master-database' ? 'active' : ''}`} onClick={() => navigate('/master-database')}>
-                  <Database size={18} /><span>Vendor Database</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* SUPER_ADMIN: restricted sidebar — Dashboard + System only */
-        ) : isSuperAdmin ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">Administration</p>
-              <nav className="sidebar-nav">
-                <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
-                  <LayoutDashboard size={18} /><span>Dashboard</span>
-                </button>
-              </nav>
-            </div>
-            <div className="sidebar-section">
-              <p className="section-title">System</p>
-              <nav className="sidebar-nav">
-                <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
-                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* COO role: Dashboard + Stock Requests + Inventory + New Purchase */
-        ) : isCOO ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">COO</p>
-              <nav className="sidebar-nav">
-                <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
-                  <LayoutDashboard size={18} /><span>Dashboard</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/store-requests' ? 'active' : ''}`} onClick={() => navigate('/store-requests')}>
-                  <UtensilsCrossed size={18} /><span>Stock Requests</span>
-                  <span className="nav-notification-dot"></span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/food-requests' ? 'active' : ''}`} onClick={() => navigate('/food-requests')}>
-                  <Package size={18} /><span>Food Requests</span>
-                  <span className="nav-notification-dot"></span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/inventory' ? 'active' : ''}`} onClick={() => navigate('/inventory')}>
-                  <ShoppingBag size={18} /><span>Inventory</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/production' ? 'active' : ''}`} onClick={() => navigate('/production')}>
-                  <ChefHat size={18} /><span>Production</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/revenue' ? 'active' : ''}`} onClick={() => navigate('/revenue')}>
-                  <DollarSign size={18} /><span>Revenue Management</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/purchase' ? 'active' : ''}`} onClick={() => navigate('/purchase')}>
-                  <ShoppingBag size={18} /><span>New Purchase</span>
-                </button>
-                <button className={`nav-item ${location.pathname === '/expense-approvals' ? 'active' : ''}`} onClick={() => navigate('/expense-approvals')}>
-                  <DollarSign size={18} /><span>Expense Approvals</span>
-                </button>
-              </nav>
-            </div>
-            <div className="sidebar-section">
-              <p className="section-title">System</p>
-              <nav className="sidebar-nav">
-                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* PARTNER: dashboard only */
-        ) : isPartner ? (
-          <div className="sidebar-scrollable">
-            <div className="sidebar-section">
-              <p className="section-title">Partner</p>
-              <nav className="sidebar-nav">
-                <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
-                  <LayoutDashboard size={18} /><span>Dashboard</span>
-                </button>
-              </nav>
-            </div>
-            <div className="sidebar-section">
-              <p className="section-title">System</p>
-              <nav className="sidebar-nav">
-                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-                </button>
-              </nav>
-            </div>
-          </div>
-
-        /* ADMIN and all other roles: full sidebar */
-        ) : (
-        <div className="sidebar-scrollable">
-          <div className="sidebar-section">
-            <p className="section-title">Operations</p>
-            <nav className="sidebar-nav">
-              <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
-                <LayoutDashboard size={18} /><span>Dashboard</span>
-              </button>
-              {isCenters ? (
-                <>
-                  <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
-                    <MenuSquare size={18} /><span>Menu</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
-                    <UtensilsCrossed size={18} /><span>My Requests</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
-                    <Package size={18} /><span>Inventory</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production', 'production')}>
-                    <ChefHat size={18} /><span>Production</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
-                    <ShoppingBag size={18} /><span>Purchases</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
-                    <TrendingDown size={18} /><span>Wastage Management</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
-                    <DollarSign size={18} /><span>Revenue Console</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/pricing', 'pricing') ? 'active' : ''}`} onClick={() => navTo('/pricing', 'pricing')}>
-                    <CreditCard size={18} /><span>Pricing Rates</span>
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button className={`nav-item ${isActive('/users', 'users') ? 'active' : ''}`} onClick={() => navTo('/users', 'users')}>
-                    <Users size={18} /><span>Users</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
-                    <MenuSquare size={18} /><span>Menu</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/bom', 'bom') ? 'active' : ''}`} onClick={() => navTo('/bom', 'bom')}>
-                    <ClipboardList size={18} /><span>BOM</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/item-config', 'item-config') ? 'active' : ''}`} onClick={() => navTo('/item-config', 'item-config')}>
-                    <Settings2 size={18} /><span>Raw Material</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
-                    <UtensilsCrossed size={18} /><span>Food Requests</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/master-database', 'master-database') ? 'active' : ''}`} onClick={() => navTo('/master-database', 'master-database')}>
-                    <Database size={18} /><span>Master Database</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
-                    <Package size={18} /><span>Inventory</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/production', 'production') ? 'active' : ''}`} onClick={() => navTo('/production', 'production')}>
-                    <ChefHat size={18} /><span>Production</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
-                    <ShoppingBag size={18} /><span>Purchase</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
-                    <Trash2 size={18} /><span>Wastage</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/payment-settings', 'payment-settings') ? 'active' : ''}`} onClick={() => navTo('/payment-settings', 'payment-settings')}>
-                    <CreditCard size={18} /><span>Pricing Console</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
-                    <DollarSign size={18} /><span>Revenue Management</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/finance', 'finance') ? 'active' : ''}`} onClick={() => navTo('/finance', 'finance')}>
-                    <Banknote size={18} /><span>Finance</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/centers', 'centers') ? 'active' : ''}`} onClick={() => navTo('/centers', 'centers')}>
-                    <Store size={18} /><span>Centers</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/kitchens', 'kitchens') ? 'active' : ''}`} onClick={() => navTo('/kitchens', 'kitchens')}>
-                    <ChefHat size={18} /><span>Kitchen</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/stores', 'stores') ? 'active' : ''}`} onClick={() => navTo('/stores', 'stores')}>
-                    <ShoppingBag size={18} /><span>Store</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/resorts', 'resorts') ? 'active' : ''}`} onClick={() => navTo('/resorts', 'resorts')}>
-                    <Palmtree size={18} /><span>Resort</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/aggregates', 'aggregates') ? 'active' : ''}`} onClick={() => navTo('/aggregates', 'aggregates')}>
-                    <Network size={18} /><span>Aggregate</span>
-                  </button>
-                  <button className={`nav-item ${isActive('/restaurants', 'restaurants') ? 'active' : ''}`} onClick={() => navTo('/restaurants', 'restaurants')}>
-                    <UtensilsCrossed size={18} /><span>Restaurant</span>
-                  </button>
-                </>
-              )}
-            </nav>
-          </div>
-          {user?.role !== 'CENTERS' && (
-            <div className="sidebar-section">
-              <p className="section-title">System</p>
-              <nav className="sidebar-nav">
-                <button className="nav-item"><Settings size={18} /><span>Settings</span></button>
-                <button className="nav-item theme-toggle-btn" onClick={toggleTheme}>
-                  {theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}
-                  <span>{theme === 'light' ? 'Night Mode' : 'Day Mode'}</span>
-                </button>
-              </nav>
-            </div>
-          )}
-        </div>
-        )}
+        {renderSidebar()}
       </aside>
 
       <div className="dashboard-content">
