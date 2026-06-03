@@ -157,7 +157,24 @@ const PurchasePage: React.FC = () => {
       setRequestForm({ items: [], notes: '', vendorId: '', destinationLocation: '' });
       fetchData();
     } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to submit request');
+      if (err.response?.status === 409) {
+        const confirmForce = window.confirm(
+          `${err.response?.data?.error || 'A duplicate pending request already exists.'}\n\nDo you want to proceed and raise an additional Purchase Request for these items?`
+        );
+        if (confirmForce) {
+          try {
+            await purchaseApi.createRequest({ ...requestForm, allowDuplicate: true });
+            setShowRequestModal(false);
+            setRequestForm({ items: [], notes: '', vendorId: '', destinationLocation: '' });
+            fetchData();
+            return;
+          } catch (retryErr: any) {
+            alert(retryErr.response?.data?.error || 'Failed to submit request');
+          }
+        }
+      } else {
+        alert(err.response?.data?.error || 'Failed to submit request');
+      }
     } finally {
       setIsProcessing(false);
     }

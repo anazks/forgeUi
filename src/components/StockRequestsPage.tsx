@@ -154,7 +154,45 @@ const StockRequestsPage: React.FC = () => {
       showToast('Purchase Requests generated successfully!', 'success');
       fetchDemand();
     } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to create PRs', 'error');
+      if (err.response?.status === 409) {
+        const confirmForce = window.confirm(
+          `${err.response?.data?.error || 'One or more duplicate pending requests already exist.'}\n\nDo you want to proceed and force raise these Purchase Requests anyway?`
+        );
+        if (confirmForce) {
+          try {
+            setIsBulkProcessing(true);
+            await Promise.all(Object.values(groupedByVendorAndLoc).map(group => {
+              return purchaseApi.createRequest({
+                vendorId: group.vendorId,
+                destinationLocation: group.locationId,
+                allowDuplicate: true,
+                items: group.items.map((i: any) => ({
+                  item: i.materialId,
+                  itemName: i.name,
+                  requestedQty: orderQuantities[`${i.materialId}-${i.locationId}`] !== undefined
+                    ? orderQuantities[`${i.materialId}-${i.locationId}`]
+                    : i.approvedGap,
+                  unitPrice: unitPrices[`${i.materialId}-${i.locationId}`] || 0,
+                  unit: i.unit
+                }))
+              });
+            }));
+            const newRaised = { ...raisedPrs };
+            selectedItems.forEach(item => {
+              newRaised[`${item.materialId}-${item.locationId}`] = true;
+            });
+            setRaisedPrs(newRaised);
+            setSelectedForPr({});
+            showToast('Purchase Requests generated successfully!', 'success');
+            fetchDemand();
+            return;
+          } catch (retryErr: any) {
+            showToast(retryErr.response?.data?.error || 'Failed to create PRs', 'error');
+          }
+        }
+      } else {
+        showToast(err.response?.data?.error || 'Failed to create PRs', 'error');
+      }
     } finally {
       setIsBulkProcessing(false);
     }
