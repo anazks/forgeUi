@@ -14,7 +14,6 @@ import MasterDatabasePage from './components/MasterDatabasePage';
 import PurchasePage from './components/PurchasePage';
 import ProductionPage from './components/ProductionPage';
 import PaymentSettings from './components/PaymentSettings';
-import WastagePage from './components/WastagePage';
 import CentersDashboardPage from './components/CentersDashboardPage';
 import LocationPricingPage from './components/LocationPricingPage';
 import FinancePage from './components/FinancePage';
@@ -61,8 +60,6 @@ function App() {
         <Route path="/entity/:entityId/item-config" element={<ItemConfigPage />} />
         <Route path="/food-requests" element={<FoodRequestPage />} />
         <Route path="/entity/:entityId/food-requests" element={<FoodRequestPage />} />
-        <Route path="/wastage" element={<WastagePage />} />
-        <Route path="/entity/:entityId/wastage" element={<WastagePage />} />
         <Route path="/master-database" element={<MasterDatabasePage />} />
         <Route path="/master-database/:tab" element={<MasterDatabasePage />} />
         <Route path="/entity/:entityId/master-database" element={<MasterDatabasePage />} />

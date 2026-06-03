@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { userApi, wastageApi, foodRequestApi } from '../services/api';
+import { userApi, revenueApi, foodRequestApi } from '../services/api';
 
 const CentersDashboardPage: React.FC = () => {
   const navigate = useNavigate();
@@ -27,7 +27,7 @@ const CentersDashboardPage: React.FC = () => {
   const [view, setView] = useState<'total' | 'center'>('total');
   const [selectedCenter, setSelectedCenter] = useState<any>(null);
   const [centers, setCenters] = useState<any[]>([]);
-  const [allWastage, setAllWastage] = useState<any[]>([]);
+  const [allRevenue, setAllRevenue] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -35,7 +35,7 @@ const CentersDashboardPage: React.FC = () => {
   // Center detail state
   const [centerTab, setCenterTab] = useState<'dashboard' | 'requests' | 'wastage'>('dashboard');
   const [centerRequests, setCenterRequests] = useState<any[]>([]);
-  const [centerWastage, setCenterWastage] = useState<any[]>([]);
+  const [centerRevenue, setCenterRevenue] = useState<any[]>([]);
 
   useEffect(() => {
     fetchInitialData();
@@ -44,12 +44,14 @@ const CentersDashboardPage: React.FC = () => {
   const fetchInitialData = async () => {
     try {
       setIsLoading(true);
-      const [centersRes, wastageRes] = await Promise.all([
+      const today = new Date();
+      const end = new Date(today.getTime() + 86400000 * 2).toLocaleDateString('en-CA');
+      const [centersRes, revenueRes] = await Promise.all([
         userApi.getMyCenters(entityId),
-        wastageApi.getAll()
+        revenueApi.getDaily('', 'ALL', '2020-01-01', end)
       ]);
       setCenters(centersRes.data.data || []);
-      setAllWastage(wastageRes.data.data || []);
+      setAllRevenue(revenueRes.data.data.records || []);
     } catch (err: any) {
       setError('Failed to load center data');
     } finally {
@@ -63,13 +65,15 @@ const CentersDashboardPage: React.FC = () => {
     setCenterTab('dashboard');
     setIsLoading(true);
     try {
-      const [reqRes, wastRes] = await Promise.all([
+      const today = new Date();
+      const end = new Date(today.getTime() + 86400000 * 2).toLocaleDateString('en-CA');
+      const [reqRes, revRes] = await Promise.all([
         foodRequestApi.getAll(entityId, center._id),
-        wastageApi.getAll(center._id)
+        revenueApi.getDaily('', center._id, '2020-01-01', end)
       ]);
       
       setCenterRequests(reqRes.data.data || []);
-      setCenterWastage(wastRes.data.data || []);
+      setCenterRevenue(revRes.data.data.records || []);
     } catch (err: any) {
       console.error(err);
     } finally {
@@ -82,26 +86,62 @@ const CentersDashboardPage: React.FC = () => {
     setSelectedCenter(null);
   };
 
-  // Filter wastage based on selected date
-  const filteredWastage = selectedDate 
-    ? allWastage.filter(r => r.date === selectedDate)
-    : allWastage;
+  const getRecordMetrics = (record: any) => {
+    let recordSales = 0;
+    let recordCost = 0;
+    let recordWastageCost = 0;
+    
+    if (record.b2cSales && Array.isArray(record.b2cSales)) {
+      record.b2cSales.forEach((item: any) => {
+        const sold = item.soldQty || 0;
+        const stock = item.stockQty || 0;
+        const price = item.unitPrice || 0;
+        const buyRate = item.buyingPrice || 0;
+        
+        recordSales += sold * price;
+        recordCost += stock * buyRate;
+        recordWastageCost += Math.max(0, stock - sold) * buyRate;
+      });
+    }
+    
+    const recordMargin = recordSales - recordCost;
+    return {
+      sales: recordSales,
+      cost: recordCost,
+      wastageCost: recordWastageCost,
+      margin: recordMargin
+    };
+  };
+
+  // Filter revenue based on selected date
+  const filteredRevenue = selectedDate 
+    ? allRevenue.filter(r => new Date(r.date).toISOString().slice(0, 10) === selectedDate)
+    : allRevenue;
 
   // Aggregated Stats
-  const totalSales = filteredWastage.reduce((sum, r) => sum + (r.totalSales || 0), 0);
-  const totalCost = filteredWastage.reduce((sum, r) => sum + (r.totalCost || 0), 0);
-  const totalMargin = filteredWastage.reduce((sum, r) => sum + (r.totalMargin || 0), 0);
-  const totalWastage = filteredWastage.reduce((sum, r) => sum + (r.totalWastageCost || 0), 0);
+  let totalSales = 0;
+  let totalCost = 0;
+  let totalMargin = 0;
+  let totalWastage = 0;
 
-  // Group by Month (using ALL wastage for the trend bar)
-  const monthlyData = allWastage.reduce((acc: any, curr) => {
+  filteredRevenue.forEach(r => {
+    const metrics = getRecordMetrics(r);
+    totalSales += metrics.sales;
+    totalCost += metrics.cost;
+    totalWastage += metrics.wastageCost;
+    totalMargin += metrics.margin;
+  });
+
+  // Group by Month (using ALL revenue for the trend bar)
+  const monthlyData = allRevenue.reduce((acc: any, curr) => {
     const d = new Date(curr.date);
     const monthKey = d.toLocaleString('default', { month: 'short', year: 'numeric' });
     if (!acc[monthKey]) {
       acc[monthKey] = { month: monthKey, sales: 0, margin: 0, count: 0, dateObj: new Date(d.getFullYear(), d.getMonth(), 1) };
     }
-    acc[monthKey].sales += curr.totalSales || 0;
-    acc[monthKey].margin += curr.totalMargin || 0;
+    const metrics = getRecordMetrics(curr);
+    acc[monthKey].sales += metrics.sales;
+    acc[monthKey].margin += metrics.margin;
     acc[monthKey].count += 1;
     return acc;
   }, {});
@@ -109,7 +149,12 @@ const CentersDashboardPage: React.FC = () => {
   const sortedMonthly = Object.values(monthlyData).sort((a: any, b: any) => b.dateObj.getTime() - a.dateObj.getTime());
 
   // Recent performance (Date Sorted - using filtered data)
-  const sortedPerformance = [...filteredWastage].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  const sortedPerformance = [...filteredRevenue]
+    .map(r => ({
+      ...r,
+      metrics: getRecordMetrics(r)
+    }))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   if (isLoading && view === 'total') return <ForgeLoader />;
 
@@ -237,10 +282,10 @@ const CentersDashboardPage: React.FC = () => {
                         {sortedPerformance.map(record => (
                           <tr key={record._id}>
                             <td className="date-cell">{new Date(record.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</td>
-                            <td><strong>{record.centerId?.name?.toUpperCase()}</strong></td>
-                            <td className="income-cell">₹ {record.totalSales?.toFixed(2)}</td>
-                            <td className={`margin-cell ${record.totalMargin >= 0 ? 'plus' : 'minus'}`}>
-                              ₹ {record.totalMargin?.toFixed(2)}
+                            <td><strong>{record.locationId?.name?.toUpperCase() || 'UNKNOWN'}</strong></td>
+                            <td className="income-cell">₹ {record.metrics.sales.toFixed(2)}</td>
+                            <td className={`margin-cell ${record.metrics.margin >= 0 ? 'plus' : 'minus'}`}>
+                              ₹ {record.metrics.margin.toFixed(2)}
                             </td>
                           </tr>
                         ))}
@@ -293,7 +338,7 @@ const CentersDashboardPage: React.FC = () => {
                              <DollarSign size={14} />
                              <label>TOTAL REVENUE</label>
                           </div>
-                          <h3 className="income-text">₹ {centerWastage.reduce((s,r) => s + (r.totalSales || 0), 0).toLocaleString()}</h3>
+                          <h3 className="income-text">₹ {centerRevenue.reduce((s,r) => s + (getRecordMetrics(r).sales || 0), 0).toLocaleString()}</h3>
                           <div className="stat-footer">LIFETIME REVENUE</div>
                         </div>
                         <div className="stat-card compact">
@@ -301,7 +346,12 @@ const CentersDashboardPage: React.FC = () => {
                              <TrendingUp size={14} />
                              <label>AVG MARGIN</label>
                           </div>
-                          <h3 className="margin-text">₹ {(centerWastage.reduce((s,r) => s + (r.totalMargin || 0), 0) / (centerWastage.length || 1)).toFixed(2)}</h3>
+                          <h3 className="margin-text">
+                            ₹ {(
+                              centerRevenue.reduce((s,r) => s + (getRecordMetrics(r).margin || 0), 0) / 
+                              (centerRevenue.length || 1)
+                            ).toFixed(2)}
+                          </h3>
                           <div className="stat-footer">PER DAY AVERAGE</div>
                         </div>
                         <div className="stat-card compact">
@@ -309,7 +359,7 @@ const CentersDashboardPage: React.FC = () => {
                              <PackageMinus size={14} />
                              <label>WASTAGE LOSS</label>
                           </div>
-                          <h3 className="loss-text">₹ {centerWastage.reduce((s,r) => s + (r.totalWastageCost || 0), 0).toLocaleString()}</h3>
+                          <h3 className="loss-text">₹ {centerRevenue.reduce((s,r) => s + (getRecordMetrics(r).wastageCost || 0), 0).toLocaleString()}</h3>
                           <div className="stat-footer">LIFETIME LOSS</div>
                         </div>
                       </section>
@@ -320,17 +370,20 @@ const CentersDashboardPage: React.FC = () => {
                           <h2><TrendingUp size={14} /> PERFORMANCE TREND (LAST 7 RECORDS)</h2>
                         </div>
                         <div className="trend-row-container">
-                          {centerWastage.slice(0, 7).map((rec: any) => (
-                            <div key={rec._id} className="trend-tile">
-                              <span className="tt-date">{new Date(rec.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
-                              <div className="tt-bar-wrap">
-                                <div className="tt-bar income" style={{ height: `${Math.min((rec.totalSales / 5000) * 100, 100)}%` }}></div>
-                                <div className="tt-bar margin" style={{ height: `${Math.min((Math.max(rec.totalMargin, 0) / 5000) * 100, 100)}%` }}></div>
+                          {centerRevenue.slice(0, 7).map((rec: any) => {
+                            const metrics = getRecordMetrics(rec);
+                            return (
+                              <div key={rec._id} className="trend-tile">
+                                <span className="tt-date">{new Date(rec.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</span>
+                                <div className="tt-bar-wrap">
+                                  <div className="tt-bar income" style={{ height: `${Math.min((metrics.sales / 5000) * 100, 100)}%` }}></div>
+                                  <div className="tt-bar margin" style={{ height: `${Math.min((Math.max(metrics.margin, 0) / 5000) * 100, 100)}%` }}></div>
+                                </div>
+                                <span className="tt-val">₹{metrics.sales > 1000 ? (metrics.sales / 1000).toFixed(1) + 'k' : metrics.sales}</span>
                               </div>
-                              <span className="tt-val">₹{rec.totalSales > 1000 ? (rec.totalSales / 1000).toFixed(1) + 'k' : rec.totalSales}</span>
-                            </div>
-                          ))}
-                          {centerWastage.length === 0 && <div className="empty-state">Not enough data for trends.</div>}
+                            );
+                          })}
+                          {centerRevenue.length === 0 && <div className="empty-state">Not enough data for trends.</div>}
                         </div>
                       </div>
                     </div>
@@ -393,21 +446,24 @@ const CentersDashboardPage: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody>
-                            {[...centerWastage].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(rec => (
-                              <tr key={rec._id}>
-                                <td className="date-cell">{new Date(rec.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                                <td>₹ {rec.totalCost?.toFixed(2)}</td>
-                                <td className="income-cell">₹ {rec.totalSales?.toFixed(2)}</td>
-                                <td style={{ color: '#ef4444', fontWeight: 700 }}>₹ {rec.totalWastageCost?.toFixed(2)}</td>
-                                <td style={{ textAlign: 'right' }} className={`margin-cell ${rec.totalMargin >= 0 ? 'plus' : 'minus'}`}>
-                                  ₹ {rec.totalMargin?.toFixed(2)}
-                                </td>
-                              </tr>
-                            ))}
+                            {[...centerRevenue].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(rec => {
+                              const metrics = getRecordMetrics(rec);
+                              return (
+                                <tr key={rec._id}>
+                                  <td className="date-cell">{new Date(rec.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                                  <td>₹ {metrics.cost.toFixed(2)}</td>
+                                  <td className="income-cell">₹ {metrics.sales.toFixed(2)}</td>
+                                  <td style={{ color: '#ef4444', fontWeight: 700 }}>₹ {metrics.wastageCost.toFixed(2)}</td>
+                                  <td style={{ textAlign: 'right' }} className={`margin-cell ${metrics.margin >= 0 ? 'plus' : 'minus'}`}>
+                                    ₹ {metrics.margin.toFixed(2)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
-                      {centerWastage.length === 0 && <div className="empty-state">No wastage records found for this center.</div>}
+                      {centerRevenue.length === 0 && <div className="empty-state">No wastage records found for this center.</div>}
                     </div>
                   )}
                 </>

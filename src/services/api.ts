@@ -189,17 +189,6 @@ export const purchaseApi = {
   updateBill: (id: string, data: any) => api.put(`/purchases/bills/${id}`, data),
 };
 
-export const wastageApi = {
-  getToday: (date?: string) => api.get(`/wastage/today${date ? `?date=${date}` : ''}`),
-  getAll: (centerId?: string, date?: string) => {
-    let url = `/wastage?`;
-    if (centerId) url += `centerId=${centerId}&`;
-    if (date) url += `date=${date}&`;
-    return api.get(url);
-  },
-  save: (data: any) => api.post('/wastage', data),
-};
-
 export const financeApi = {
   getStats: (entityId?: string) => api.get(`/finance/stats${entityId ? `?entityId=${entityId}` : ''}`),
   getAll: (entityId?: string) => api.get(`/finance${entityId ? `?entityId=${entityId}` : ''}`),

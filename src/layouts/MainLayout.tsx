@@ -460,9 +460,6 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                 <button className={`nav-item ${isActive('/purchase', 'purchase') ? 'active' : ''}`} onClick={() => navTo('/purchase', 'purchase')}>
                   <ShoppingBag size={18} /><span>Purchases</span>
                 </button>
-                <button className={`nav-item ${isActive('/wastage', 'wastage') ? 'active' : ''}`} onClick={() => navTo('/wastage', 'wastage')}>
-                  <TrendingDown size={18} /><span>Wastage Management</span>
-                </button>
                 <button className={`nav-item ${isActive('/revenue', 'revenue') ? 'active' : ''}`} onClick={() => navTo('/revenue', 'revenue')}>
                   <DollarSign size={18} /><span>Revenue Console</span>
                 </button>
