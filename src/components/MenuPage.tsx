@@ -545,6 +545,16 @@ const MenuPage: React.FC = () => {
       {error && !isModalOpen && <div className="error-message">{error}</div>}
       {success && <div className="success-banner">{success}</div>}
 
+      {viewMode !== 'functions' && (
+        <div className="info-banner" style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', color: '#60a5fa', padding: '12px 20px', fontSize: '0.8rem', fontWeight: 600, marginBottom: '20px' }}>
+          <div style={{ fontWeight: 800, marginBottom: '4px' }}>💡 Menu Guidelines:</div>
+          <ol style={{ margin: 0, paddingLeft: '20px', lineHeight: '1.4' }}>
+            <li>BOM Dishes will be automatically added to Menu once when Created from BOM Page.</li>
+            <li>For BOM Dishes, set the Pricing in Pricing Console.</li>
+          </ol>
+        </div>
+      )}
+
       {/* Summary Strip */}
       <div className="menu-summary">
         <div className="msm-stat">

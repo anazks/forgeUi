@@ -319,6 +319,10 @@ const BomPage: React.FC = () => {
 
       {error && !isModalOpen && <div className="error-message">{error}</div>}
 
+      <div className="info-banner" style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', color: '#60a5fa', padding: '12px 20px', fontSize: '0.8rem', fontWeight: 600, marginBottom: '20px' }}>
+        💡 <strong>Ingredient Guideline:</strong> All raw materials should be in Raw Material Database to Add as BOM Ingredient.
+      </div>
+
       <div className="data-panel">
         <div className="panel-header">
           <h2>{boms.length} TOTAL RECIPES</h2>

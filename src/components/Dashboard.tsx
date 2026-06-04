@@ -19,7 +19,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Char
 import {
   userApi, entityApi, rawMaterialApi,
   foodRequestApi, employeeApi, productionApi, purchaseApi,
-  inventoryApi, revenueApi, expenseApi, functionOrderApi
+  inventoryApi, revenueApi, expenseApi, functionOrderApi, eventApi
 } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
 
@@ -84,21 +84,27 @@ const Dashboard: React.FC = () => {
   const [inventory, setInventory] = useState<any[]>([]);
   const [rawMaterials, setRawMaterials] = useState<any[]>([]);
   const [hrDashboardMetrics, setHrDashboardMetrics] = useState<any>(null);
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
 
   // Single-Login Dashboard states (Center, Kitchen, etc.)
   const [localTodayRevenue, setLocalTodayRevenue] = useState<any>(null);
   const [localYesterdayRevenue, setLocalYesterdayRevenue] = useState<any>(null);
   const [localTomorrowRequest, setLocalTomorrowRequest] = useState<any>(null);
 
+  const getISTDate = (d: Date = new Date()) => {
+    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+    return new Date(utc + (3600000 * 5.5));
+  };
+
   // Audit state for Notification bar & Workflows
-  const [todayStr] = useState<string>(getLocalDateString(new Date()));
+  const [todayStr] = useState<string>(() => getLocalDateString(getISTDate()));
   const [yesterdayStr] = useState<string>(() => {
-    const d = new Date();
+    const d = getISTDate();
     d.setDate(d.getDate() - 1);
     return getLocalDateString(d);
   });
   const [tomorrowStr] = useState<string>(() => {
-    const d = new Date();
+    const d = getISTDate();
     d.setDate(d.getDate() + 1);
     return getLocalDateString(d);
   });
@@ -155,7 +161,7 @@ const Dashboard: React.FC = () => {
 
         // Fetch parallel datasets
         const [
-          revRes, expRes, billRes, purchRes, foRes, empRes, frRes, ioRes, rmRes, invRes
+          revRes, expRes, billRes, purchRes, foRes, empRes, frRes, ioRes, rmRes, invRes, upcomingRes
         ] = await Promise.all([
           revenueApi.getDaily("", checkedLocations.join(','), startDate, endDate),
           expenseApi.getAll({ startDate, endDate, locationId: checkedLocations.join(',') }),
@@ -166,7 +172,8 @@ const Dashboard: React.FC = () => {
           foodRequestApi.getAll(entityId),
           productionApi.getOrders('send'),
           rawMaterialApi.getAll(entityId),
-          inventoryApi.getAll()
+          inventoryApi.getAll(),
+          eventApi.getUpcoming()
         ]);
 
         setRevenueData(revRes.data.data);
@@ -179,6 +186,7 @@ const Dashboard: React.FC = () => {
         setInternalOrders(ioRes.data.data || []);
         setRawMaterials(rmRes.data.data || []);
         setInventory(invRes.data.data || []);
+        setUpcomingEvents(upcomingRes.data.data || []);
 
         if (activeTab === 'hr') {
           try {
@@ -190,7 +198,7 @@ const Dashboard: React.FC = () => {
         }
       } else {
         // Individual Login dashboard loads localized info
-        const locationId = user._id;
+        const locationId = user.id || user._id;
 
         const [
           todayRevRes,
@@ -202,7 +210,9 @@ const Dashboard: React.FC = () => {
           frRes,
           ioRes,
           invRes,
-          rmRes
+          rmRes,
+          upcomingRes,
+          foRes
         ] = await Promise.all([
           revenueApi.getDaily(todayStr, undefined).catch(() => ({ data: { data: null } })),
           revenueApi.getDaily(yesterdayStr, undefined).catch(() => ({ data: { data: null } })),
@@ -213,7 +223,9 @@ const Dashboard: React.FC = () => {
           foodRequestApi.getAll(entityId),
           productionApi.getOrders('send'),
           inventoryApi.getAll(locationId),
-          rawMaterialApi.getAll(entityId)
+          rawMaterialApi.getAll(entityId),
+          eventApi.getUpcoming(),
+          functionOrderApi.getAll()
         ]);
 
         setLocalTodayRevenue(todayRevRes.data?.data || null);
@@ -225,6 +237,8 @@ const Dashboard: React.FC = () => {
         setInternalOrders(ioRes.data.data || []);
         setInventory(invRes.data.data || []);
         setRawMaterials(rmRes.data.data || []);
+        setUpcomingEvents(upcomingRes.data.data || []);
+        setFunctionOrders(foRes.data.data || []);
 
         // tomorrow request
         const tomorrowRequest = (tomorrowFrRes.data.data || []).find((fr: any) => {
@@ -566,12 +580,13 @@ const Dashboard: React.FC = () => {
   // 5. Audit Single Location (Yesterday/Today/Tomorrow Statuses)
   const auditStatuses = useMemo(() => {
     if (!user) return null;
+    const userId = user.id || user._id;
 
     // Helper to evaluate center workflow conditions
     const checkCenterTimeline = (targetDateStr: string, revRecord: any) => {
       const frs = foodRequests.filter(fr => {
         const dStr = getLocalDateString(new Date(fr.deliveryDate));
-        return dStr === targetDateStr && (fr.centerId?._id || fr.centerId) === user._id;
+        return dStr === targetDateStr && (fr.centerId?._id || fr.centerId) === userId;
       });
 
       const hasRequest = frs.length > 0;
@@ -579,7 +594,7 @@ const Dashboard: React.FC = () => {
       
       const orders = internalOrders.filter(o => {
         const dStr = getLocalDateString(new Date(o.createdAt));
-        return dStr === targetDateStr && (o.destinationLocation?._id || o.destinationLocation) === user._id;
+        return dStr === targetDateStr && (o.destinationLocation?._id || o.destinationLocation) === userId;
       });
       const inProd = orders.length > 0;
       const received = orders.length > 0 && orders.every(o => o.status === 'RECEIVED');
@@ -599,7 +614,7 @@ const Dashboard: React.FC = () => {
     const checkKitchenTimeline = (targetDateStr: string) => {
       const kitchenOrders = internalOrders.filter(o => {
         const dStr = getLocalDateString(new Date(o.createdAt));
-        return dStr === targetDateStr && (o.sourceLocation?._id || o.sourceLocation) === user._id;
+        return dStr === targetDateStr && (o.sourceLocation?._id || o.sourceLocation) === userId;
       });
 
       const hasOrders = kitchenOrders.length > 0;
@@ -651,7 +666,7 @@ const Dashboard: React.FC = () => {
       }
     } else {
       // Individual Login Notifications
-      const myId = user._id;
+      const myId = user.id || user._id;
 
       if (['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role)) {
         // Food request tomorrow created
@@ -762,8 +777,36 @@ const Dashboard: React.FC = () => {
       }
     }
 
+    // Special Day Alerts (1 day before) in IST
+    upcomingEvents.forEach((ev: any) => {
+      const dateStr = new Date(ev.eventDate).toLocaleDateString('en-GB');
+      alerts.push({
+        id: `upcoming_event_${ev._id}`,
+        text: `🎉 Tomorrow (${dateStr}) is a ${ev.eventName} day.`,
+        severity: 'info'
+      });
+    });
+
+    // Function Order Alerts (not requested for tomorrow)
+    if (isCorporate || ['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role)) {
+      const myId = user.id || user._id;
+      const pendingFoTomorrow = functionOrders.filter(fo => {
+        const eventDateStr = getLocalDateString(new Date(fo.eventDate));
+        const isMyCenter = isCorporate ? true : (fo.centerId?._id || fo.centerId) === myId;
+        return eventDateStr === tomorrowStr && fo.status === 'OPEN' && isMyCenter;
+      });
+
+      pendingFoTomorrow.forEach(fo => {
+        alerts.push({
+          id: `pending_fo_${fo._id}`,
+          text: `⚠️ Tomorrow's function order event (${fo.description}) is not yet requested!`,
+          severity: 'warning'
+        });
+      });
+    }
+
     return alerts;
-  }, [user, foodRequests, internalOrders, tomorrowStr, localTodayRevenue, todayStr, filteredDailyRevenues, inventory, rawMaterials, bills]);
+  }, [user, foodRequests, internalOrders, tomorrowStr, localTodayRevenue, todayStr, filteredDailyRevenues, inventory, rawMaterials, bills, upcomingEvents, functionOrders]);
 
   // ── 5-min auto-refresh for individual logins only ──
   useEffect(() => {
@@ -1311,7 +1354,7 @@ const Dashboard: React.FC = () => {
               <div className="kpi-grid-3" style={{ marginTop: 24 }}>
                 <KpiCard icon={<DollarSign size={18} />} label="TODAY'S GROSS SALES" value={fmt(localTodayRevenue?.totalAmount || 0)} sub="Daily counter closures" />
                 <KpiCard icon={<AlertTriangle size={18} />} label="DAILY WASTAGE ESTIMATE" value={fmt(operationalStats.totalWastageCost)} sub="Stock minus Sold valuation" accent="#f59e0b" />
-                <KpiCard icon={<Clock size={18} />} label="PENDING INCOMING DELIVERIES" value={`${internalOrders.filter(o => (o.destinationLocation?._id || o.destinationLocation) === user._id && o.status === 'DISPATCHED').length}`} sub="Awaiting kitchen receipt" />
+                <KpiCard icon={<Clock size={18} />} label="PENDING INCOMING DELIVERIES" value={`${internalOrders.filter(o => (o.destinationLocation?._id || o.destinationLocation) === (user.id || user._id) && o.status === 'DISPATCHED').length}`} sub="Awaiting kitchen receipt" />
               </div>
 
               <div className="dish-rank-grid" style={{ marginTop: 20 }}>
