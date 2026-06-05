@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { employeeApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { 
-  Calendar, MapPin, Search, Edit, Check, Lock, Unlock, 
-  AlertTriangle, DollarSign, Filter, Save, FileText, ChevronRight
+  Calendar, Search, Edit, Check, Lock, 
+  AlertTriangle, Filter, Save
 } from 'lucide-react';
 
 const MONTH_NAMES = [
@@ -15,10 +15,8 @@ const MONTH_NAMES = [
 
 const HrYearViewPage: React.FC = () => {
   const { year } = useParams<{ year: string }>();
-  const navigate = useNavigate();
   const yearNum = Number(year);
 
-  const [user, setUser] = useState<any>(null);
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
   const [activeTab, setActiveTab] = useState<'yearly' | 'monthly'>('yearly');
@@ -49,10 +47,6 @@ const HrYearViewPage: React.FC = () => {
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
-      setUser(JSON.parse(userStr));
-    }
     fetchLocations();
   }, []);
 
@@ -187,40 +181,6 @@ const HrYearViewPage: React.FC = () => {
     }
   };
 
-  // Close month
-  const handleCloseMonth = async () => {
-    if (!window.confirm(`Are you sure you want to CLOSE ${MONTH_NAMES[selectedMonth - 1]} ${yearNum}? This will lock editing for all records in this month.`)) {
-      return;
-    }
-
-    try {
-      await employeeApi.closeMonth(yearNum, selectedMonth);
-      showStatus(`${MONTH_NAMES[selectedMonth - 1]} closed successfully.`);
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to close month');
-    }
-  };
-
-  // Unlock month (Only Admin role)
-  const handleUnlockMonth = async () => {
-    if (user?.role !== 'ADMIN') {
-      alert('Only Admin users are authorized to unlock a closed month.');
-      return;
-    }
-
-    if (!window.confirm(`Are you sure you want to UNLOCK ${MONTH_NAMES[selectedMonth - 1]} ${yearNum}?`)) {
-      return;
-    }
-
-    try {
-      await employeeApi.unlockMonth(yearNum, selectedMonth);
-      showStatus(`${MONTH_NAMES[selectedMonth - 1]} unlocked successfully.`);
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to unlock month');
-    }
-  };
 
   const filteredYearly = yearlyConfigs.filter(item => 
     item.employee.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -529,7 +489,7 @@ const HrYearViewPage: React.FC = () => {
                           </span>
                         </td>
                         <td className="text-center">
-                          {isMonthLocked ? (
+                          {isLocked ? (
                             <span className="text-dim" style={{ fontSize: '0.7rem' }}><Lock size={10} style={{ display: 'inline', marginRight: 4 }} /> LOCKED</span>
                           ) : isEditing ? (
                             <div style={{ display: 'flex', gap: '4px', justifyContent: 'center' }}>

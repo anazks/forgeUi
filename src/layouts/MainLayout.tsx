@@ -18,7 +18,6 @@ import {
   UtensilsCrossed,
   Database,
   CreditCard,
-  TrendingDown,
   DollarSign,
   Landmark,
   Calendar,
@@ -54,7 +53,7 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
           setFinanceLocations(saleLocs);
         })
         .catch(err => console.error('Failed to load locations in sidebar', err));
-    } else if (user?.role === 'HR' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN') {
+    } else if (user?.role === 'HR' || user?.role === 'ADMIN') {
       employeeApi.getYearViews(entityId)
         .then(res => {
           setHrYears(res.data.data || []);
@@ -241,6 +240,9 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             <nav className="sidebar-nav">
               <button className={`nav-item ${location.pathname === '/dashboard' ? 'active' : ''}`} onClick={() => navigate('/dashboard')}>
                 <LayoutDashboard size={18} /><span>Dashboard</span>
+              </button>
+              <button className={`nav-item ${location.pathname === '/users' ? 'active' : ''}`} onClick={() => navigate('/users')}>
+                <Users size={18} /><span>Entities & Users</span>
               </button>
             </nav>
           </div>

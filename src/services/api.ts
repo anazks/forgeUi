@@ -137,7 +137,7 @@ export const employeeApi = {
     if (entityId) url += `entity=${entityId}&`;
     return api.get(url);
   },
-  acknowledgeMonthlyRecord: (recordId: string, data: { leavesTaken?: number; finalSalary?: number }) =>
+  acknowledgeMonthlyRecord: (recordId: string, data: { leavesTaken?: number; finalSalary?: number; status?: 'DRAFT' | 'ACKNOWLEDGED' }) =>
     api.put(`/employees/monthly-records/${recordId}/acknowledge`, data),
   closeMonth: (year: number, month: number) => api.post(`/employees/year-views/${year}/months/${month}/close`),
   unlockMonth: (year: number, month: number) => api.post(`/employees/year-views/${year}/months/${month}/unlock`),
@@ -228,7 +228,14 @@ export const revenueApi = {
     api.put('/revenue/cash-closure', data),
   submitCashClosure: (data: { date: string; locationId?: string }) =>
     api.post('/revenue/cash-closure/submit', data),
-  cooApproveCashClosure: (data: { locationId: string; date: string; approvedExpenses: any[] }) =>
+  cooApproveCashClosure: (data: {
+    locationId: string;
+    date: string;
+    approvedExpenses: any[];
+    closureUpdates?: any;
+    b2cSales?: any[];
+    b2bSales?: any[];
+  }) =>
     api.put('/revenue/cash-closures/coo-approve', data),
   getPendingCooClosures: () =>
     api.get('/revenue/cash-closures/pending-coo'),

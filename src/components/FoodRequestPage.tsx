@@ -4,8 +4,8 @@ import MainLayout from '../layouts/MainLayout';
 import { foodRequestApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
-  Plus, RefreshCw, CheckCircle, XCircle, Clock,
-  AlertTriangle, ChevronDown, ChevronUp, Loader2,
+  RefreshCw, CheckCircle, XCircle, Clock,
+  AlertTriangle, ChevronDown, ChevronUp,
   Package, Edit3, PackageCheck, Save
 } from 'lucide-react';
 
@@ -49,12 +49,9 @@ const FoodRequestPage: React.FC = () => {
   const [locations, setLocations] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [processingId, setProcessingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
-  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   // COO Food Request approval state
   const [cooSelectedItems, setCooSelectedItems] = useState<Record<string, boolean>>({});
@@ -65,12 +62,12 @@ const FoodRequestPage: React.FC = () => {
   const [cooActiveTab, setCooActiveTab] = useState<'OPEN' | 'APPROVED'>('OPEN');
   const [cooExpandedGroups, setCooExpandedGroups] = useState<Record<string, boolean>>({});
 
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
   const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
   // Roles that submit requests (see their own cards view)
   const isCenter = user?.role === 'CENTERS' || user?.role === 'RESTAURANT' || user?.role === 'AGGREGATE';
   const isCOO = user?.role === 'COO' && !isViewOnly;
@@ -104,57 +101,6 @@ const FoodRequestPage: React.FC = () => {
 
 
 
-  const handleApprove = async (id: string) => {
-    try {
-      setProcessingId(id);
-      const res = await foodRequestApi.approve(id);
-      const { stockStatus, message } = res.data;
-      showToast(message, stockStatus === 'ALL_AVAILABLE' ? 'success' : 'warn');
-      fetchRequests();
-    } catch (err: any) {
-      showToast(err.response?.data?.error || 'Approval failed', 'error');
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleReject = async (id: string) => {
-    try {
-      setProcessingId(id);
-      await foodRequestApi.reject(id, rejectReason || 'Rejected by store manager');
-      showToast('Request rejected.', 'warn');
-      setRejectingId(null);
-      setRejectReason('');
-      fetchRequests();
-    } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to reject', 'error');
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const handleReceive = async (id: string) => {
-    try {
-      setProcessingId(id);
-      const req = requests.find(r => r._id === id);
-      const items = req.requestedItems.map((item: any, idx: number) => ({
-        ...item,
-        receivedQty: Number(receivedQtys[`${id}-${idx}`] ?? item.requestedQty)
-      }));
-
-      await foodRequestApi.receive(id, items);
-      showToast('Inventory updated and pricing adjusted!', 'success');
-      setReceivingId(null);
-      setExpandedId(null);
-      fetchRequests();
-    } catch (err: any) {
-      showToast(err.response?.data?.error || 'Failed to update receipt', 'error');
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  const pending = requests.filter(r => r.status === 'PENDING');
   const approved = requests.filter(r => r.status === 'APPROVED');
   const partial = requests.filter(r => r.status === 'PARTIAL');
   const rejected = requests.filter(r => r.status === 'REJECTED');
@@ -277,13 +223,7 @@ const FoodRequestPage: React.FC = () => {
     }
   };
 
-  const renderStatusIcon = (status: string) => {
-    if (status === 'APPROVED') return <CheckCircle size={13} />;
-    if (status === 'REJECTED') return <XCircle size={13} />;
-    if (status === 'PARTIAL') return <AlertTriangle size={13} />;
-    if (status === 'RECEIVED') return <PackageCheck size={13} />;
-    return <Clock size={13} />;
-  };
+
 
   return (
     <MainLayout>
@@ -685,7 +625,6 @@ const FoodRequestPage: React.FC = () => {
               ) : (
                 requests.map((req: any) => {
                   const isExpanded = expandedId === req._id;
-                  const isProcessing = processingId === req._id;
 
                   return (
                     <div key={req._id} className={`fr-card ${req.status.toLowerCase()}`}>

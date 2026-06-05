@@ -4,9 +4,8 @@ import MainLayout from '../layouts/MainLayout';
 import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { 
-  ShoppingBag, Plus, Trash2, Check, X, 
-  DollarSign, Package, Truck, CreditCard,
-  Edit3
+  ShoppingBag, Plus, Trash2, X, 
+  DollarSign, Package, Truck
 } from 'lucide-react';
 
 const PurchasePage: React.FC = () => {
@@ -24,7 +23,6 @@ const PurchasePage: React.FC = () => {
   const isLocationUser = ['STORE', 'CENTERS', 'RESTAURANT', 'RESORT', 'AGGREGATE', 'KITCHEN'].includes(user?.role);
 
   // Data states
-  const [requests, setRequests] = useState<any[]>([]);
   const [bills, setBills] = useState<any[]>([]);
   const [items, setItems] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
@@ -37,7 +35,6 @@ const PurchasePage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'VENDOR' | 'INTERNAL'>('VENDOR');
   const [internalOrders, setInternalOrders] = useState<any[]>([]);
   const [showRequestModal, setShowRequestModal] = useState(false);
-  const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [expenseForm, setExpenseForm] = useState({
     date: new Date().toISOString().split('T')[0],
@@ -46,13 +43,11 @@ const PurchasePage: React.FC = () => {
     amount: 0,
     paymentMethod: 'Cash'
   });
-  const [showBillModal, setShowBillModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [selectedPR, setSelectedPR] = useState<any>(null);
+
   const [selectedBill, setSelectedBill] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [receiveForm, setReceiveForm] = useState<Record<string, number>>({});
-  const [receiveFormPrice, setReceiveFormPrice] = useState<Record<string, number>>({});
   const [selectedForReceive, setSelectedForReceive] = useState<Record<string, boolean>>({});
   const [filterLocation, setFilterLocation] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
@@ -65,24 +60,12 @@ const PurchasePage: React.FC = () => {
     destinationLocation: ''
   });
 
-  // Form states for Approval
-  const [approvalForm, setApprovalForm] = useState({
-    vendor: '',
-    items: [] as any[]
-  });
 
-  // Form states for Bill Payment
-  const [paymentForm, setPaymentForm] = useState({
-    paidAmount: 0,
-    paymentStatus: 'UNPAID',
-    deliveryStatus: 'PENDING'
-  });
 
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [rRes, bRes, iRes, vRes, locRes, mRes, intRes, expRes] = await Promise.all([
-        purchaseApi.getRequests(),
+      const [bRes, iRes, vRes, locRes, mRes, intRes, expRes] = await Promise.all([
         purchaseApi.getBills(),
         rawMaterialApi.getAll(entityId),
         vendorApi.getAll(entityId),
@@ -91,7 +74,6 @@ const PurchasePage: React.FC = () => {
         productionApi.getOrders('receive'),
         expenseApi.getAll()
       ]);
-      setRequests(rRes.data.data || []);
       setBills(bRes.data.data || []);
       setItems(iRes.data.data || []);
       setVendors(vRes.data.data || []);
@@ -180,59 +162,7 @@ const PurchasePage: React.FC = () => {
     }
   };
 
-  // --- Admin Approval Logic ---
 
-  const openApprovalModal = (pr: any) => {
-    setSelectedPR(pr);
-    setApprovalForm({
-      vendor: pr.vendor || '',
-      items: pr.items.map((i: any) => ({
-        ...i,
-        approvedQty: i.requestedQty,
-        unitPrice: 0
-      }))
-    });
-    setShowApprovalModal(true);
-  };
-
-  const handleApprovePR = async () => {
-    if (!approvalForm.vendor) return alert('Please select a vendor');
-    try {
-      setIsProcessing(true);
-      await purchaseApi.approveRequest(selectedPR._id, approvalForm);
-      setShowApprovalModal(false);
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to approve request');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // --- Bill Management Logic ---
-
-  const openBillModal = (bill: any) => {
-    setSelectedBill(bill);
-    setPaymentForm({
-      paidAmount: bill.paidAmount,
-      paymentStatus: bill.paymentStatus,
-      deliveryStatus: bill.deliveryStatus
-    });
-    setShowBillModal(true);
-  };
-
-  const handleUpdateBill = async () => {
-    try {
-      setIsProcessing(true);
-      await purchaseApi.updateBill(selectedBill._id, paymentForm);
-      setShowBillModal(false);
-      fetchData();
-    } catch (err: any) {
-      alert(err.response?.data?.error || 'Failed to update bill');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
 
   // --- Manual Expense Logic ---
   const handleSubmitExpense = async (e: React.FormEvent) => {
@@ -274,13 +204,10 @@ const PurchasePage: React.FC = () => {
   const openReceiveModal = (bill: any) => {
     setSelectedBill(bill);
     const qtys: Record<string, number> = {};
-    const prices: Record<string, number> = {};
     bill.items.forEach((item: any) => {
       qtys[item.item] = item.receivedQty !== undefined ? item.receivedQty : item.quantity;
-      prices[item.item] = item.unitPrice || 0;
     });
     setReceiveForm(qtys);
-    setReceiveFormPrice(prices);
     setShowReceiveModal(true);
   };
 
@@ -728,96 +655,7 @@ const PurchasePage: React.FC = () => {
         </div>
       )}
 
-      {/* 2. Admin: Approval Modal */}
-      {showApprovalModal && selectedPR && (
-        <div className="modal-overlay">
-          <div className="modal-content workflow-modal" style={{ maxWidth: '900px' }}>
-            <div className="modal-header">
-              <h2><Edit3 size={18} /> REVIEW PURCHASE REQUEST — {selectedPR.prCode}</h2>
-              <button className="close-btn" onClick={() => setShowApprovalModal(false)}><X size={20} /></button>
-            </div>
-            
-            <div className="modal-body">
-              <div className="approval-header-info">
-                <div className="info-group">
-                  <label>REQUESTED BY</label>
-                  <span>{selectedPR.requestedBy?.name}</span>
-                </div>
-                <div className="info-group">
-                  <label>VENDOR SELECTION</label>
-                  <select 
-                    value={approvalForm.vendor} 
-                    onChange={(e) => setApprovalForm(prev => ({ ...prev, vendor: e.target.value }))}
-                  >
-                    <option value="">SELECT VENDOR...</option>
-                    <option value="NOT_NOW">NOT NOW (INTERNAL)</option>
-                    {vendors.map(v => (
-                      <option key={v._id} value={v._id}>{v.vendorName.toUpperCase()}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
 
-              <div className="approval-items-table">
-                <table className="mini-table">
-                  <thead>
-                    <tr>
-                      <th>ITEM</th>
-                      <th>REQUESTED</th>
-                      <th>APPROVE QTY</th>
-                      <th>UNIT PRICE (₹)</th>
-                      <th>TOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {approvalForm.items.map((ai, idx) => (
-                      <tr key={ai.item}>
-                        <td>{ai.itemName}</td>
-                        <td>{ai.requestedQty} {ai.unit}</td>
-                        <td>
-                          <input 
-                            type="number" 
-                            value={ai.approvedQty} 
-                            onChange={(e) => {
-                              const newItems = [...approvalForm.items];
-                              newItems[idx].approvedQty = Number(e.target.value);
-                              setApprovalForm(prev => ({ ...prev, items: newItems }));
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input 
-                            type="number" 
-                            value={ai.unitPrice} 
-                            onChange={(e) => {
-                              const newItems = [...approvalForm.items];
-                              newItems[idx].unitPrice = Number(e.target.value);
-                              setApprovalForm(prev => ({ ...prev, items: newItems }));
-                            }}
-                          />
-                        </td>
-                        <td className="text-primary">₹{(ai.approvedQty * ai.unitPrice).toLocaleString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="approval-summary-banner">
-                <label>TOTAL BILL AMOUNT</label>
-                <span>₹{approvalForm.items.reduce((acc, curr) => acc + (curr.approvedQty * curr.unitPrice), 0).toLocaleString()}</span>
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowApprovalModal(false)}>CANCEL</button>
-              <button className="btn-save" onClick={handleApprovePR} disabled={isProcessing || !approvalForm.vendor}>
-                {isProcessing ? 'GENERATING BILL...' : 'APPROVE & GENERATE BILL'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Delivery Receipt Modal */}
       {showReceiveModal && selectedBill && (
@@ -924,71 +762,7 @@ const PurchasePage: React.FC = () => {
         </div>
       )}
 
-      {/* 3. Admin: Bill/Payment Modal */}
-      {showBillModal && selectedBill && (
-        <div className="modal-overlay">
-          <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h2><CreditCard size={18} /> MANAGE BILL — {selectedBill.billCode}</h2>
-              <button className="close-btn" onClick={() => setShowBillModal(false)}><X size={20} /></button>
-            </div>
-            
-            <div className="modal-body">
-              <div className="bill-detail-card">
-                <div className="bill-row">
-                  <label>VENDOR</label>
-                  <span>{selectedBill.vendor?.vendorName}</span>
-                </div>
-                <div className="bill-row highlight">
-                  <label>TOTAL AMOUNT</label>
-                  <span>₹{selectedBill.totalAmount.toLocaleString()}</span>
-                </div>
-              </div>
 
-              <div className="bill-management-form">
-                <div className="input-group">
-                  <label>DELIVERY STATUS (UPDATES INVENTORY)</label>
-                  <select 
-                    value={paymentForm.deliveryStatus} 
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, deliveryStatus: e.target.value }))}
-                  >
-                    <option value="PENDING">PENDING (AWAITING SHIPMENT)</option>
-                    <option value="DELIVERED">DELIVERED (ADD TO STOCK)</option>
-                  </select>
-                </div>
-
-                <div className="input-group">
-                  <label>PAYMENT STATUS</label>
-                  <select 
-                    value={paymentForm.paymentStatus} 
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, paymentStatus: e.target.value }))}
-                  >
-                    <option value="UNPAID">UNPAID</option>
-                    <option value="PARTIAL">PARTIAL PAYMENT</option>
-                    <option value="PAID">FULLY PAID</option>
-                  </select>
-                </div>
-
-                <div className="input-group">
-                  <label>AMOUNT PAID (₹)</label>
-                  <input 
-                    type="number" 
-                    value={paymentForm.paidAmount} 
-                    onChange={(e) => setPaymentForm(prev => ({ ...prev, paidAmount: Number(e.target.value) }))}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-footer">
-              <button className="btn-cancel" onClick={() => setShowBillModal(false)}>CANCEL</button>
-              <button className="btn-save" onClick={handleUpdateBill} disabled={isProcessing}>
-                {isProcessing ? 'UPDATING...' : 'CONFIRM UPDATES'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Add Expense Modal */}
       {showExpenseModal && (

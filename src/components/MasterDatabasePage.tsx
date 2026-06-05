@@ -5,11 +5,11 @@ import { vendorApi, employeeApi, bankApi, eventApi, expenseCategoryApi, userApi 
 import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { 
-  Database, Users, Building2, Landmark, 
+  Users, Landmark, 
   Calendar, Layers, Search, Plus, Filter,
-  Phone, MapPin, Briefcase, CalendarDays,
+  Phone, Briefcase, 
   X, Check, Mail, CreditCard, ShieldCheck,
-  UserPlus, HardHat, Building, Bell, Tag, Trash2
+  UserPlus, Building, Bell, Tag, Trash2, Loader2
 } from 'lucide-react';
 
 type MasterTab = 'vendors' | 'employees' | 'banks' | 'calendar' | 'expenses';
@@ -131,7 +131,7 @@ const MasterDatabasePage: React.FC = () => {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev: any) => ({ ...prev, [name]: value }));
   };
 
   const handleEmployeeLocationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -148,7 +148,7 @@ const MasterDatabasePage: React.FC = () => {
         inferredType = 'Head Office';
       }
     }
-    setFormData(prev => ({
+    setFormData((prev: any) => ({
       ...prev,
       locationName: locName,
       locationType: inferredType
@@ -626,7 +626,7 @@ const MasterDatabasePage: React.FC = () => {
               <div className="modal-footer">
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
-                  {isSaving ? <ForgeLoader size={16} /> : <Check size={16} />}
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                   SAVE VENDOR
                 </button>
               </div>
@@ -718,7 +718,7 @@ const MasterDatabasePage: React.FC = () => {
               <div className="modal-footer">
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
-                  {isSaving ? <ForgeLoader size={16} /> : <Check size={16} />}
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                   REGISTER EMPLOYEE
                 </button>
               </div>
@@ -762,7 +762,7 @@ const MasterDatabasePage: React.FC = () => {
               <div className="modal-footer">
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
-                  {isSaving ? <ForgeLoader size={16} /> : <Check size={16} />}
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                   SAVE BANK
                 </button>
               </div>
@@ -825,7 +825,7 @@ const MasterDatabasePage: React.FC = () => {
               <div className="modal-footer">
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
-                  {isSaving ? <ForgeLoader size={16} /> : <Check size={16} />}
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                   SAVE EVENT
                 </button>
               </div>
@@ -906,7 +906,7 @@ const MasterDatabasePage: React.FC = () => {
               <div className="modal-footer">
                 <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
-                  {isSaving ? <ForgeLoader size={16} /> : <Check size={16} />}
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                   SAVE CATEGORY
                 </button>
               </div>

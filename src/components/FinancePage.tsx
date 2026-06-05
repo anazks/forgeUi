@@ -12,13 +12,11 @@ import {
   Lock, 
   Unlock, 
   ShieldAlert,
-  Building2,
-  X,
-  Loader2
+  Building2
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { financeApi, userApi, bankApi, expenseApi, purchaseApi } from '../services/api';
+import { financeApi, userApi, bankApi, purchaseApi } from '../services/api';
 
 type TopTabType = 'dashboard' | 'location' | 'banks' | 'stock_purchases';
 type LogTabType = 'b2c' | 'b2b';
@@ -35,8 +33,6 @@ const FinancePage: React.FC = () => {
   // Dashboard rollups & logs
   const [dashboardStats, setDashboardStats] = useState<any>(null);
   const [locationLogs, setLocationLogs] = useState<any[]>([]);
-  const [locationExpenses, setLocationExpenses] = useState<any[]>([]);
-  const [mappedBank, setMappedBank] = useState<any>(null);
   
   // Bank List states
   const [banksList, setBanksList] = useState<any[]>([]);
@@ -164,10 +160,8 @@ const FinancePage: React.FC = () => {
       const entityId = currentUser?.role === 'SUPER_ADMIN' ? undefined : (currentUser?.entity?._id || currentUser?.entity);
       const res = await financeApi.getFinanceLocationDetails(locationId, entityId);
       
-      const { records, bank, expenses } = res.data.data;
+      const { records } = res.data.data;
       setLocationLogs(records || []);
-      setLocationExpenses(expenses || []);
-      setMappedBank(bank || null);
       setExpandedDate(null); // Reset expanded accordion day
 
       // Prepopulate verification inputs
@@ -213,58 +207,6 @@ const FinancePage: React.FC = () => {
     }
   };
 
-  const handleFinanceApprove = async (expenseId: string) => {
-    try {
-      setIsSubmitting(true);
-      setError('');
-      setSuccess('');
-      await expenseApi.financeApprove(expenseId);
-      setSuccess('Expense approved successfully!');
-      if (selectedLocationId) {
-        fetchLocationLogs(selectedLocationId);
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to approve expense');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleFinanceReject = async (expenseId: string) => {
-    try {
-      setIsSubmitting(true);
-      setError('');
-      setSuccess('');
-      await expenseApi.financeReject(expenseId);
-      setSuccess('Expense rejected successfully!');
-      if (selectedLocationId) {
-        fetchLocationLogs(selectedLocationId);
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to reject expense');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const getMonthlyMismatchSum = () => {
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-
-    let totalMismatch = 0;
-    locationLogs.forEach(rec => {
-      if (rec.status !== 'CLOSED') return;
-      const recDate = new Date(rec.date);
-      if (recDate.getFullYear() === currentYear && recDate.getMonth() === currentMonth) {
-        const verif = localVerification[rec.date] || {};
-        const isOnlineEnabled = !!selectedLoc?.onlineSalesEnabled;
-        const math = getReconciliationMath(rec, verif, selectedLocRole, isOnlineEnabled);
-        totalMismatch += math.difference;
-      }
-    });
-    return totalMismatch;
-  };
 
   const handleSaveVerification = async (dateStr: string, isAck: boolean = false) => {
     const inputs = localVerification[dateStr];

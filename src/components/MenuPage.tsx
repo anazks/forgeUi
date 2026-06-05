@@ -396,44 +396,6 @@ const MenuPage: React.FC = () => {
     }
   };
 
-  // Legacy single-item request (kept for non-center roles, now unused for centers)
-  const handleRequest = async (item: any) => {
-    const qty = orderQtys[item._id];
-    if (!qty || qty <= 0) {
-      setError('Please enter a valid quantity');
-      setTimeout(() => setError(''), 3000);
-      return;
-    }
-
-    try {
-      setIsSubmitting(true);
-      const payload = {
-        centerName: user.name || 'Unknown Center',
-        centerId: user._id || user.id,
-        entity: user.entity?._id || user.entity || null,
-        deliveryDate: deliveryDate || new Date().toISOString(),
-        requestedItems: [{
-          materialName: item.name || item.dishName || 'Unknown Item',
-          requestedQty: Number(qty),
-          unit: item.unit ? (item.unit === 'custom' ? item.customUnit : item.unit) : 'unit',
-          isMenuItem: true,
-          menuId: item._source === 'DIRECT' ? item._id : null,
-          bomId: item._source === 'BOM' ? item._id : null
-        }],
-        notes: `Center Request: ${qty} units of ${item.name || item.dishName || 'item'}`
-      };
-
-      await foodRequestApi.create(payload);
-      setSuccess(`Successfully requested ${qty} units of ${item.name || item.dishName || 'item'} for ${new Date(deliveryDate).toLocaleDateString()}`);
-      setOrderQtys(prev => ({ ...prev, [item._id]: 0 }));
-      setTimeout(() => setSuccess(''), 5000);
-    } catch (err: any) {
-      console.log(err);
-      setError(err.response?.data?.error || 'Failed to submit request');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });

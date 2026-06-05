@@ -20,7 +20,7 @@ const EntityDetail: React.FC = () => {
   const [isRenewing, setIsRenewing] = useState(false);
   const [isEditingEntity, setIsEditingEntity] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [renewalData, setRenewalData] = useState({ amount: 0, duration: 1 });
+  const [renewalData, setRenewalData] = useState<{ amount: number; duration: number; customLicenseDate?: string }>({ amount: 0, duration: 1 });
   const [editEntityData, setEditEntityData] = useState({ name: '', location: '', username: '' });
   const [customLicenseDate, setCustomLicenseDate] = useState('');
 

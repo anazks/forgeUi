@@ -30,12 +30,12 @@ const StockRequestsPage: React.FC = () => {
     return tomorrow.toISOString().split('T')[0];
   });
 
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
   const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
   const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO' || isViewOnly;
 
   useEffect(() => {
@@ -116,10 +116,10 @@ const StockRequestsPage: React.FC = () => {
       return;
     }
 
+    let groupedByVendorAndLoc: Record<string, any> = {};
     try {
       setIsBulkProcessing(true);
       
-      const groupedByVendorAndLoc: Record<string, any> = {};
       selectedItems.forEach(item => {
         const vId = vendorForPr[`${item.materialId}-${item.locationId}`];
         const lId = item.locationId;
@@ -128,7 +128,7 @@ const StockRequestsPage: React.FC = () => {
         groupedByVendorAndLoc[key].items.push(item);
       });
 
-      await Promise.all(Object.values(groupedByVendorAndLoc).map(group => {
+      await Promise.all(Object.values(groupedByVendorAndLoc).map((group: any) => {
         return purchaseApi.createRequest({
           vendorId: group.vendorId,
           destinationLocation: group.locationId,
@@ -161,7 +161,7 @@ const StockRequestsPage: React.FC = () => {
         if (confirmForce) {
           try {
             setIsBulkProcessing(true);
-            await Promise.all(Object.values(groupedByVendorAndLoc).map(group => {
+            await Promise.all(Object.values(groupedByVendorAndLoc).map((group: any) => {
               return purchaseApi.createRequest({
                 vendorId: group.vendorId,
                 destinationLocation: group.locationId,

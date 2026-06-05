@@ -6,7 +6,7 @@ import { Plus, Search, Loader2, X, Edit2, Trash2, Trash, ChevronDown } from 'luc
 import { useParams } from 'react-router-dom';
 
 /* ─── Searchable Material Dropdown ─────────────────────────────────── */
-interface Material { _id: string; name: string; simpleCode: string; unit: string; customUnit?: string; sourceType?: 'raw' | 'menu'; }
+interface Material { _id: string; name: string; simpleCode: string; unit: string; customUnit?: string; sourceType?: 'raw' | 'menu' | 'bom'; }
 
 interface MaterialDropdownProps {
   materials: Material[];
@@ -302,8 +302,7 @@ const BomPage: React.FC = () => {
     }
   };
 
-  const getUnitLabel = (unit: string, customUnit?: string) =>
-    unit === 'custom' ? (customUnit || '').toUpperCase() : unit.toUpperCase();
+
 
   return (
     <MainLayout>

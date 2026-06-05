@@ -19,9 +19,12 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Title, Char
 import {
   userApi, entityApi, rawMaterialApi,
   foodRequestApi, employeeApi, productionApi, purchaseApi,
-  inventoryApi, revenueApi, expenseApi, functionOrderApi, eventApi
+  inventoryApi, revenueApi, expenseApi, functionOrderApi, eventApi,
+  paymentApi
 } from '../services/api';
 import MainLayout from '../layouts/MainLayout';
+
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── Module-level sub-components (stable references, not recreated on render) ──
 const KpiCard = ({ icon, label, value, sub, accent }: {
@@ -113,6 +116,34 @@ const Dashboard: React.FC = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [newEntity, setNewEntity] = useState({ username: '', name: '', location: '' });
 
+  // ── Super Admin Dashboard States ──
+  const [saEntities, setSaEntities] = useState<any[]>([]);
+  const [saUpcomingRenewals, setSaUpcomingRenewals] = useState<any[]>([]);
+  const [saSelectedYear, setSaSelectedYear] = useState<number>(new Date().getFullYear());
+  const [saRevenueData, setSaRevenueData] = useState<any[]>([]);
+  const [saYearTotal, setSaYearTotal] = useState<number>(0);
+  const saYearOptions = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: 5 }, (_, i) => currentYear - i);
+  }, []);
+
+  const saFetchRevenue = useCallback(async (year: number) => {
+    try {
+      const res = await paymentApi.getMonthlyRevenue(year);
+      setSaRevenueData(res.data.data || []);
+      setSaYearTotal(res.data.saYearTotal || res.data.yearTotal || 0);
+    } catch (saErr) {
+      console.error('Failed to fetch SA monthly revenue', saErr);
+      setSaRevenueData([]);
+      setSaYearTotal(0);
+    }
+  }, []);
+
+  const getDaysUntil = (dateStr: string) => {
+    const diffTime = new Date(dateStr).getTime() - Date.now();
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
   // 1. Fetch user on mount & redirect if Store (merged now)
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -125,7 +156,7 @@ const Dashboard: React.FC = () => {
   // 2. Fetch locations when user is loaded (Corporate Roles)
   useEffect(() => {
     if (!user) return;
-    const isCorporate = ['SUPER_ADMIN', 'ADMIN', 'COO', 'PARTNER'].includes(user.role);
+    const isCorporate = ['ADMIN', 'COO', 'PARTNER'].includes(user.role);
     if (!isCorporate) return;
 
     const fetchLocs = async () => {
@@ -148,11 +179,20 @@ const Dashboard: React.FC = () => {
     setIsLoading(true);
     setError('');
 
-    const isCorporate = ['SUPER_ADMIN', 'ADMIN', 'COO', 'PARTNER'].includes(user.role);
+    const isSuperAdmin = user.role === 'SUPER_ADMIN';
+    const isCorporate = ['ADMIN', 'COO', 'PARTNER'].includes(user.role);
     const entityId = user.entity?._id || user.entity;
 
     try {
-      if (isCorporate) {
+      if (isSuperAdmin) {
+        const [saEntityRes, saRenewalRes] = await Promise.all([
+          entityApi.getAll(),
+          entityApi.getUpcomingRenewals()
+        ]);
+        setSaEntities(saEntityRes.data.data || []);
+        setSaUpcomingRenewals(saRenewalRes.data.data || []);
+        await saFetchRevenue(saSelectedYear);
+      } else if (isCorporate) {
         // Enforce at least one location checked
         if (checkedLocations.length === 0) {
           setIsLoading(false);
@@ -260,12 +300,19 @@ const Dashboard: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user, checkedLocations, startDate, endDate, activeTab, todayStr, yesterdayStr, tomorrowStr]);
+  }, [user, checkedLocations, startDate, endDate, activeTab, todayStr, yesterdayStr, tomorrowStr, saSelectedYear, saFetchRevenue]);
 
   // Fetch when slicers, tab, or user changes
   useEffect(() => {
     fetchDashboardData();
   }, [fetchDashboardData]);
+
+  // Fetch SA billing revenue when selected year changes
+  useEffect(() => {
+    if (user?.role === 'SUPER_ADMIN') {
+      saFetchRevenue(saSelectedYear);
+    }
+  }, [saSelectedYear, saFetchRevenue, user?.role]);
 
   // Helper: toggle checked location check state
   const handleToggleLocation = (locId: string) => {
@@ -642,7 +689,7 @@ const Dashboard: React.FC = () => {
 
     if (!user) return [];
 
-    const isCorporate = ['SUPER_ADMIN', 'ADMIN', 'COO', 'PARTNER'].includes(user.role);
+    const isCorporate = ['ADMIN', 'COO', 'PARTNER'].includes(user.role);
 
     if (isCorporate) {
       // 1. Day closures pending executive approval
@@ -810,7 +857,7 @@ const Dashboard: React.FC = () => {
 
   // ── 5-min auto-refresh for individual logins only ──
   useEffect(() => {
-    const isCorporate = ['SUPER_ADMIN', 'ADMIN', 'COO', 'PARTNER'].includes(user?.role || '');
+    const isCorporate = ['ADMIN', 'COO', 'PARTNER'].includes(user?.role || '');
     if (isCorporate || !user) return;
     const timer = setInterval(() => { fetchDashboardData(); }, 5 * 60 * 1000);
     return () => clearInterval(timer);
@@ -874,7 +921,8 @@ const Dashboard: React.FC = () => {
     );
   }
 
-  const isCorporate = ['SUPER_ADMIN', 'ADMIN', 'COO', 'PARTNER'].includes(user.role);
+  const isSuperAdmin = user.role === 'SUPER_ADMIN';
+  const isCorporate = ['ADMIN', 'COO', 'PARTNER'].includes(user.role);
 
   return (
     <MainLayout>
@@ -895,12 +943,18 @@ const Dashboard: React.FC = () => {
       <header className="db-header">
         <div className="db-header-left">
           <h1 className="db-title">
-            {user.role === 'SUPER_ADMIN' ? '⚡ ENTERPRISE OPS' : `${user.role} DASHBOARD`}
+            {isSuperAdmin ? '⚡ ENTERPRISE OPS' : `${user.role} DASHBOARD`}
           </h1>
           <p className="db-subtitle">Welcome back, {user.name?.toUpperCase()} · {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
         </div>
 
-        {isCorporate ? (
+        {isSuperAdmin ? (
+          <div className="db-slicers">
+            <button className="btn-primary-sm" onClick={() => setIsAdding(true)}>
+              <Plus size={13} /> REGISTER UNIT
+            </button>
+          </div>
+        ) : isCorporate ? (
           <div className="db-slicers">
             {/* Fixed-position location dropdown */}
             <div className="loc-dd-wrap" id="loc-dd-root">
@@ -946,12 +1000,6 @@ const Dashboard: React.FC = () => {
             <button className="btn-refresh" onClick={fetchDashboardData} title="Refresh data">
               <Activity size={14} /> REFRESH
             </button>
-
-            {user.role === 'SUPER_ADMIN' && (
-              <button className="btn-primary-sm" onClick={() => setIsAdding(true)}>
-                <Plus size={13} /> REGISTER UNIT
-              </button>
-            )}
           </div>
         ) : (
           <div className="db-individual-meta">
@@ -964,9 +1012,189 @@ const Dashboard: React.FC = () => {
       {error && <div className="db-error">{error}</div>}
 
       {/* ═══════════════════════════════════════════════
-          CORPORATE VIEW
+          DASHBOARD CONTENT SECTIONS
       ═══════════════════════════════════════════════ */}
-      {isCorporate ? (
+      {isSuperAdmin ? (
+        <div className="sa-dash">
+          {/* KPI Stats Row */}
+          <div className="kpi-grid-3">
+            <KpiCard icon={<Building size={18} />} label="ACTIVE ENTITIES" value={`${saEntities.length}`} sub="Registered business units" />
+            <KpiCard icon={<Users size={18} />} label="TOTAL SYSTEM USERS" value={`${saEntities.reduce((a, e) => a + (e.admins?.length || 0), 0)}`} sub="Registered administrative users" />
+            <KpiCard icon={<Activity size={18} />} label="SYSTEM STATUS" value="OPERATIONAL" sub="All services running normally" accent="#10b981" />
+          </div>
+
+          {/* Revenue Chart + Renewals */}
+          <div className="chart-row-2" style={{ marginTop: 24 }}>
+            <div className="chart-card">
+              <div className="chart-hdr">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <div>
+                    <h2>MONTHLY REVENUE</h2>
+                    <span className="chart-sub">SaaS Subscription Revenue ({saYearTotal > 0 ? fmt(saYearTotal) : '₹0'} total)</span>
+                  </div>
+                  <select
+                    className="year-select"
+                    value={saSelectedYear}
+                    onChange={e => setSaSelectedYear(parseInt(e.target.value))}
+                    style={{
+                      background: 'rgba(0,0,0,0.2)',
+                      border: '1px solid var(--border-main)',
+                      color: 'var(--text-main)',
+                      padding: '4px 8px',
+                      fontSize: '0.8rem',
+                      outline: 'none'
+                    }}
+                  >
+                    {saYearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="chart-body" style={{ height: 220, position: 'relative' }}>
+                {saRevenueData.length === 0 ? (
+                  <div className="empty-chart">No billing records for selected year</div>
+                ) : (
+                  <Bar
+                    data={{
+                      labels: MONTHS,
+                      datasets: [{
+                        label: 'Subscription Revenue',
+                        data: saRevenueData.map(m => m.total),
+                        backgroundColor: '#f97316',
+                        borderRadius: 4
+                      }]
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                          callbacks: {
+                            label: ctx => `₹${Number(saRevenueData[ctx.dataIndex]?.total || 0).toLocaleString('en-IN')} (${saRevenueData[ctx.dataIndex]?.count || 0} renewals)`
+                          }
+                        }
+                      },
+                      scales: {
+                        x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.06)' } },
+                        y: { ticks: { color: '#94a3b8', font: { size: 10 }, callback: (v: any) => `₹${(v/1000).toFixed(0)}k` }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                      }
+                    }}
+                    height={220}
+                  />
+                )}
+              </div>
+            </div>
+
+            <div className="chart-card">
+              <div className="chart-hdr">
+                <h2>UPCOMING RENEWALS</h2>
+                <span className="chart-sub">Licenses expiring in the next 6 months</span>
+              </div>
+              <div className="tbl-wrapper" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                <table className="dash-table">
+                  <thead>
+                    <tr>
+                      <th>ADMIN / ENTITY</th>
+                      <th>EXPIRY DATE</th>
+                      <th style={{ textAlign: 'right' }}>DAYS REMAINING</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {saUpcomingRenewals.map((u: any, idx: number) => {
+                      const daysLeft = getDaysUntil(u.licenseExpires);
+                      const isUrgent = daysLeft <= 30;
+                      return (
+                        <tr key={u._id || idx}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              {isUrgent && <AlertTriangle size={12} style={{ color: '#ef4444' }} />}
+                              <div>
+                                <p style={{ fontWeight: 'bold', fontSize: '0.85rem', margin: 0 }}>{u.name}</p>
+                                <p style={{ color: 'var(--text-dim)', fontSize: '0.7rem', margin: 0 }}>{u.entity?.name || '—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td>{new Date(u.licenseExpires).toLocaleDateString('en-IN')}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 'bold', color: isUrgent ? '#ef4444' : 'var(--text-main)' }}>
+                            {daysLeft} days
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {saUpcomingRenewals.length === 0 && (
+                      <tr>
+                        <td colSpan={3} style={{ textAlign: 'center', color: '#64748b' }}>
+                          No upcoming renewals in next 6 months
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* Business Units Table */}
+          <div className="chart-card" style={{ marginTop: 24 }}>
+            <div className="chart-hdr">
+              <h2>REGISTERED BUSINESS UNITS</h2>
+              <span className="chart-sub">{saEntities.length} active tenant entities</span>
+            </div>
+            <div className="tbl-wrapper">
+              <table className="dash-table">
+                <thead>
+                  <tr>
+                    <th>ENTITY NAME</th>
+                    <th>LOCATION</th>
+                    <th>IDENTIFIER</th>
+                    <th style={{ textAlign: 'right' }}>ADMINS</th>
+                    <th style={{ textAlign: 'right' }}>ACTION</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {saEntities.map((entity: any, idx: number) => (
+                    <tr key={entity._id || idx}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{
+                            width: 28, height: 28, background: 'var(--primary)', color: 'white',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontWeight: 'bold', fontSize: '0.8rem'
+                          }}>
+                            {entity.name?.[0] || 'E'}
+                          </div>
+                          <strong style={{ fontSize: '0.85rem' }}>{entity.name?.toUpperCase()}</strong>
+                        </div>
+                      </td>
+                      <td>{entity.location}</td>
+                      <td><code className="u-code">#{entity.username}</code></td>
+                      <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>
+                        {entity.admins?.length || 0}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          className="btn-refresh"
+                          style={{ padding: '4px 8px', fontSize: '0.75rem', display: 'inline-flex', marginLeft: 'auto' }}
+                          onClick={() => navigate(`/entity/${entity._id}`)}
+                        >
+                          CONSOLE <ChevronRight size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {saEntities.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: 'center', color: '#64748b' }}>
+                        No registered entities found.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : isCorporate ? (
         <div className="corp-dash">
           {/* Tab Nav */}
           <nav className="tab-bar">
@@ -1484,14 +1712,26 @@ const Dashboard: React.FC = () => {
               {designationPieData.length > 0 && (
                 <div className="chart-card" style={{ marginTop: 24 }}>
                   <div className="chart-hdr"><h2>STAFF DESIGNATION MIX</h2></div>
-                  <div className="chart-body pie-center">
-                    <PieChart width={300} height={200}>
-                      <Pie data={designationPieData} cx={150} cy={95} outerRadius={80} dataKey="value" label={({ name, value }) => `${name} (${value})`} fontSize={9}>
-                        {designationPieData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-                      </Pie>
-                      <Tooltip contentStyle={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', fontSize: 11 }} />
-                    </PieChart>
-                  </div>
+                    <div style={{ width: 240, height: 220 }}>
+                      <Pie
+                        data={{
+                          labels: designationPieData.map(d => d.name),
+                          datasets: [{
+                            data: designationPieData.map(d => d.value),
+                            backgroundColor: designationPieData.map(d => d.fill),
+                            borderWidth: 0
+                          }]
+                        }}
+                        options={{
+                          responsive: true,
+                          maintainAspectRatio: false,
+                          plugins: {
+                            legend: { position: 'bottom', labels: { color: '#94a3b8', font: { size: 10 }, padding: 8 } },
+                            tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} staff` } }
+                          }
+                        }}
+                      />
+                    </div>
                 </div>
               )}
             </div>

@@ -3,17 +3,18 @@ import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { inventoryApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
-import { Package, Search, Filter, Edit3, Save, X } from 'lucide-react';
+import { Filter, Edit3, Save, X } from 'lucide-react';
 
 const InventoryPage: React.FC = () => {
   const { entityId } = useParams<{ entityId: string }>();
   
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
+
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
   const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
 
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
   const isStore = user?.role === 'STORE' || user?.role === 'ADMIN' || user?.role === 'SUPER_ADMIN' || user?.role === 'COO';
 
   const [inventory, setInventory] = useState<any[]>([]);

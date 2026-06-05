@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { 
-  Search, 
   Store, 
   TrendingUp, 
   TrendingDown, 
@@ -21,7 +20,6 @@ import ForgeLoader from './ForgeLoader';
 import { userApi, revenueApi, foodRequestApi } from '../services/api';
 
 const CentersDashboardPage: React.FC = () => {
-  const navigate = useNavigate();
   const { entityId } = useParams<{ entityId: string }>();
   
   const [view, setView] = useState<'total' | 'center'>('total');
@@ -29,7 +27,6 @@ const CentersDashboardPage: React.FC = () => {
   const [centers, setCenters] = useState<any[]>([]);
   const [allRevenue, setAllRevenue] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
   const [selectedDate, setSelectedDate] = useState<string>('');
   
   // Center detail state
@@ -53,7 +50,7 @@ const CentersDashboardPage: React.FC = () => {
       setCenters(centersRes.data.data || []);
       setAllRevenue(revenueRes.data.data.records || []);
     } catch (err: any) {
-      setError('Failed to load center data');
+      console.error('Failed to load center data', err);
     } finally {
       setIsLoading(false);
     }
