@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi } from '../services/api';
+import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi, expenseCategoryApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import { 
   ShoppingBag, Plus, Trash2, X, 
-  DollarSign, Package, Truck
+  DollarSign, Package, Truck,
+  Calendar, Tag, FileText, CreditCard, Coins
 } from 'lucide-react';
 
 const PurchasePage: React.FC = () => {
@@ -29,6 +30,7 @@ const PurchasePage: React.FC = () => {
   const [vendors, setVendors] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<any[]>([]);
   
   // UI states
   const [isLoading, setIsLoading] = useState(true);
@@ -39,7 +41,7 @@ const PurchasePage: React.FC = () => {
   const [expenseForm, setExpenseForm] = useState({
     date: new Date().toISOString().split('T')[0],
     description: '',
-    category: 'Transport- Food',
+    category: '',
     amount: 0,
     paymentMethod: 'Cash'
   });
@@ -51,6 +53,8 @@ const PurchasePage: React.FC = () => {
   const [selectedForReceive, setSelectedForReceive] = useState<Record<string, boolean>>({});
   const [filterLocation, setFilterLocation] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [filterDate, setFilterDate] = useState<string>('');
 
   // Form states for New Request
   const [requestForm, setRequestForm] = useState({
@@ -65,14 +69,15 @@ const PurchasePage: React.FC = () => {
   const fetchData = async () => {
     try {
       setIsLoading(true);
-      const [bRes, iRes, vRes, locRes, mRes, intRes, expRes] = await Promise.all([
+      const [bRes, iRes, vRes, locRes, mRes, intRes, expRes, catRes] = await Promise.all([
         purchaseApi.getBills(),
         rawMaterialApi.getAll(entityId),
         vendorApi.getAll(entityId),
         userApi.getLocations(entityId),
         menuApi.getAll(entityId),
         productionApi.getOrders('receive'),
-        expenseApi.getAll()
+        expenseApi.getAll(),
+        expenseCategoryApi.getAll(entityId)
       ]);
       setBills(bRes.data.data || []);
       setItems(iRes.data.data || []);
@@ -81,6 +86,7 @@ const PurchasePage: React.FC = () => {
       setMenuItems(mRes.data.data || []);
       setInternalOrders(intRes.data.data || []);
       setExpenses(expRes.data.data || []);
+      setExpenseCategories(catRes.data.data || []);
     } catch (err) {
       console.error('Failed to fetch purchase data');
     } finally {
@@ -91,6 +97,12 @@ const PurchasePage: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [entityId]);
+
+  useEffect(() => {
+    if (expenseCategories.length > 0) {
+      setExpenseForm(prev => ({ ...prev, category: expenseCategories[0].categoryName }));
+    }
+  }, [expenseCategories]);
 
   // --- Purchase Request Logic ---
 
@@ -132,6 +144,12 @@ const PurchasePage: React.FC = () => {
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (requestForm.items.length === 0) return alert('Please add at least one item');
+    
+    const zeroPriceItem = requestForm.items.find(i => !i.unitPrice || Number(i.unitPrice) <= 0);
+    if (zeroPriceItem) {
+      return alert(`Please specify a valid unit price greater than 0 for "${zeroPriceItem.itemName}".`);
+    }
+
     try {
       setIsProcessing(true);
       await purchaseApi.createRequest(requestForm);
@@ -177,7 +195,7 @@ const PurchasePage: React.FC = () => {
       setExpenseForm({
         date: new Date().toISOString().split('T')[0],
         description: '',
-        category: 'Transport- Food',
+        category: expenseCategories[0]?.categoryName || '',
         amount: 0,
         paymentMethod: 'Cash'
       });
@@ -308,210 +326,264 @@ const PurchasePage: React.FC = () => {
         >
           <ShoppingBag size={14} /> VENDOR PURCHASES &amp; EXPENSES
         </button>
-        <button 
-          className={`tab-item ${activeTab === 'INTERNAL' ? 'active' : ''}`}
-          onClick={() => setActiveTab('INTERNAL')}
-        >
-          <Truck size={14} /> INTERNAL PURCHASES
-        </button>
+        {!isStore && (
+          <button 
+            className={`tab-item ${activeTab === 'INTERNAL' ? 'active' : ''}`}
+            onClick={() => setActiveTab('INTERNAL')}
+          >
+            <Truck size={14} /> INTERNAL PURCHASES
+          </button>
+        )}
       </div>
 
       <div className="data-panel">
-        {isLoading ? <ForgeLoader /> : activeTab === 'VENDOR' ? (
-          <div className="table-wrapper">
-            {(isStore || user?.role === 'ADMIN' || user?.role === 'COO' || isViewOnly) && (
-              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', gap: '16px', alignItems: 'center' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
-                <select 
-                  value={filterLocation}
-                  onChange={(e) => setFilterLocation(e.target.value)}
-                  style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px 12px', color: 'var(--text-main)', outline: 'none' }}
-                >
-                  <option value="ALL">ALL LOCATIONS</option>
-                  {locations.map(loc => (
-                    <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
-                  ))}
-                </select>
+        {isLoading ? (
+          <ForgeLoader />
+        ) : (
+          <>
+            {/* Unified Filters Bar */}
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'center' }}>
+              {activeTab === 'VENDOR' && (isStore || user?.role === 'ADMIN' || user?.role === 'COO' || isViewOnly) && (
+                <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
+                  <select 
+                    value={filterLocation}
+                    onChange={(e) => setFilterLocation(e.target.value)}
+                    style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px 12px', color: 'var(--text-main)', outline: 'none' }}
+                  >
+                    <option value="ALL">ALL LOCATIONS</option>
+                    {locations.map(loc => (
+                      <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY DATE:</label>
+                <input 
+                  type="date"
+                  value={filterDate}
+                  onChange={(e) => setFilterDate(e.target.value)}
+                  style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '5px 12px', color: 'var(--text-main)', outline: 'none', fontSize: '0.8rem' }}
+                />
+                {filterDate && (
+                  <button 
+                    onClick={() => setFilterDate('')}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-strong)', padding: '5px 12px', color: 'var(--text-dim)', fontSize: '0.65rem', fontWeight: 900, cursor: 'pointer', transition: '0.2s' }}
+                  >
+                    CLEAR
+                  </button>
+                )}
               </div>
-            )}
-            <table className="sharp-table">
-              <thead>
-                <tr>
-                  <th>PR-CODE</th>
-                  <th>VENDOR</th>
-                  {isStore && <th>DELIVERY LOCATION</th>}
-                  <th>NUMBER OF ITEMS</th>
-                  <th>DATE</th>
-                  <th>STATUS</th>
-                  <th style={{ textAlign: 'center' }}>ACTIONS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(filterLocation === 'ALL' ? bills : bills.filter(b => b.destinationLocation === filterLocation)).length === 0 ? (
-                  <tr><td colSpan={isStore ? 6 : 5} className="text-center py-12 text-dim">No purchases found.</td></tr>
-                ) : (
-                  (filterLocation === 'ALL' ? bills : bills.filter(b => b.destinationLocation === filterLocation)).map((bill, idx) => {
-                    
-                    let displayStatus = 'PR RAISED';
-                    let statusClass = 'status-billed';
-                    if (bill.deliveryStatus === 'DELIVERED') {
-                      if (!isStore && !isAdmin) {
-                        displayStatus = 'DELIVERY RECEIVED';
-                        statusClass = 'status-delivered';
-                      } else {
-                        if (bill.paymentStatus === 'PAID') {
-                          displayStatus = 'PAYMENT DONE';
-                          statusClass = 'status-paid';
-                        } else {
-                          displayStatus = 'PAYMENT DUE';
-                          statusClass = 'status-pending';
-                        }
+            </div>
+
+            {activeTab === 'VENDOR' ? (
+              <div className="table-wrapper">
+                <table className="sharp-table">
+                  <thead>
+                    <tr>
+                      <th>PR-CODE</th>
+                      <th>VENDOR</th>
+                      {isStore && <th>DELIVERY LOCATION</th>}
+                      <th>NUMBER OF ITEMS</th>
+                      <th>DATE</th>
+                      <th>STATUS</th>
+                      <th style={{ textAlign: 'center' }}>ACTIONS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const locationFiltered = filterLocation === 'ALL' ? bills : bills.filter(b => b.destinationLocation === filterLocation);
+                      const dateFiltered = locationFiltered.filter(bill => {
+                        if (!filterDate) return true;
+                        const billDateStr = new Date(bill.createdAt).toISOString().split('T')[0];
+                        return billDateStr === filterDate;
+                      });
+
+                      if (dateFiltered.length === 0) {
+                        return <tr><td colSpan={isStore ? 7 : 6} className="text-center py-12 text-dim">No purchases found.</td></tr>;
                       }
-                    }
 
-                    const deliveryLoc = locations.find(l => l._id === bill.destinationLocation);
+                      return dateFiltered.map((bill, idx) => {
+                        let displayStatus = 'PR RAISED';
+                        let statusClass = 'status-billed';
+                        if (bill.deliveryStatus === 'DELIVERED') {
+                          if (!isStore && !isAdmin) {
+                            displayStatus = 'DELIVERY RECEIVED';
+                            statusClass = 'status-delivered';
+                          } else {
+                            if (bill.paymentStatus === 'PAID') {
+                              displayStatus = 'PAYMENT DONE';
+                              statusClass = 'status-paid';
+                            } else {
+                              displayStatus = 'PAYMENT DUE';
+                              statusClass = 'status-pending';
+                            }
+                          }
+                        }
 
-                    return (
-                      <tr key={idx}>
-                        <td>{bill.purchaseRequest?.prCode || bill.billCode}</td>
-                        <td>{bill.vendor?.vendorName || 'UNKNOWN'}</td>
-                        {isStore && <td>{deliveryLoc ? deliveryLoc.name : 'Unknown'}</td>}
-                        <td>{bill.items ? bill.items.length : 0}</td>
-                        <td>{new Date(bill.createdAt).toLocaleDateString()}</td>
-                        <td>
-                          <span className={`status-pill ${statusClass}`}>
-                            {displayStatus}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
-                            <button 
-                              className="btn-action-sm edit" 
-                              onClick={() => openReceiveModal(bill)}
-                            >
-                              <Package size={14} /> OPEN
-                            </button>
-                            {(isAdmin || user?.role === 'FINANCE' || user?.role === 'COO') && bill.deliveryStatus === 'DELIVERED' && bill.paymentStatus !== 'PAID' && !isViewOnly && (
+                        const deliveryLoc = locations.find(l => l._id === bill.destinationLocation);
+
+                        return (
+                          <tr key={idx}>
+                            <td>{bill.purchaseRequest?.prCode || bill.billCode}</td>
+                            <td>{bill.vendor?.vendorName || 'UNKNOWN'}</td>
+                            {isStore && <td>{deliveryLoc ? deliveryLoc.name : 'Unknown'}</td>}
+                            <td>{bill.items ? bill.items.length : 0}</td>
+                            <td>{new Date(bill.createdAt).toLocaleDateString()}</td>
+                            <td>
+                              <span className={`status-pill ${statusClass}`}>
+                                {displayStatus}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
+                                <button 
+                                  className="btn-action-sm edit" 
+                                  onClick={() => openReceiveModal(bill)}
+                                >
+                                  <Package size={14} /> OPEN
+                                </button>
+                                {(isAdmin || user?.role === 'FINANCE' || user?.role === 'COO') && bill.deliveryStatus === 'DELIVERED' && bill.paymentStatus !== 'PAID' && !isViewOnly && (
+                                  <button 
+                                    className="btn-action-sm received" 
+                                    onClick={() => handleUpdateBillDirect(bill._id, { paymentStatus: 'PAID' })}
+                                    title="Mark Paid"
+                                  >
+                                    <DollarSign size={14} /> MARK PAID
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+
+                {/* Manual Expenses Section */}
+                <div style={{ marginTop: '32px', borderTop: '1px solid var(--border-main)', paddingTop: '24px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '0 16px' }}>
+                    <h2 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '0.5px' }}>MANUAL EXPENSES LOG</h2>
+                  </div>
+                  <table className="sharp-table">
+                    <thead>
+                      <tr>
+                        <th>DATE</th>
+                        <th>CATEGORY</th>
+                        <th>DESCRIPTION</th>
+                        <th>AMOUNT (₹)</th>
+                        <th>PAYMENT METHOD</th>
+                        <th>STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const dateFiltered = expenses.filter(exp => {
+                          if (!filterDate) return true;
+                          const expDateStr = new Date(exp.date).toISOString().split('T')[0];
+                          return expDateStr === filterDate;
+                        });
+
+                        if (dateFiltered.length === 0) {
+                          return <tr><td colSpan={6} className="text-center py-8 text-dim">No manual expenses logged.</td></tr>;
+                        }
+
+                        return dateFiltered.map((exp, idx) => {
+                          let statusClass = 'status-pending';
+                          if (exp.status === 'APPROVED') statusClass = 'status-paid';
+                          if (exp.status === 'REJECTED') statusClass = 'status-rejected';
+                          if (exp.status === 'PENDING_FINANCE') statusClass = 'status-billed';
+
+                          return (
+                            <tr key={idx}>
+                              <td>{new Date(exp.date).toLocaleDateString()}</td>
+                              <td><strong>{exp.category}</strong></td>
+                              <td>{exp.description}</td>
+                              <td>₹ {exp.amount.toFixed(2)}</td>
+                              <td>{exp.paymentMethod}</td>
+                              <td>
+                                <span className={`status-pill ${statusClass}`}>
+                                  {exp.status.replace('_', ' ')}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <div className="table-wrapper">
+                <table className="sharp-table">
+                  <thead>
+                    <tr>
+                      <th>PO CODE</th>
+                      <th>SENDING LOCATION</th>
+                      <th>NUMBER OF ITEMS</th>
+                      <th>DATE OF RECEPTION</th>
+                      <th>STATUS</th>
+                      <th style={{ textAlign: 'center' }}>ACTION</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const dateFiltered = internalOrders.filter(order => {
+                        if (!filterDate) return true;
+                        const orderDateStr = new Date(order.receivedAt || order.dispatchedAt || order.createdAt).toISOString().split('T')[0];
+                        return orderDateStr === filterDate;
+                      });
+
+                      if (dateFiltered.length === 0) {
+                        return <tr><td colSpan={6} className="text-center py-12 text-dim">No internal purchases found.</td></tr>
+                      }
+
+                      return dateFiltered.map((order: any, idx: number) => {
+                        const receptionDate = order.receivedAt 
+                          ? new Date(order.receivedAt).toLocaleDateString()
+                          : (order.dispatchedAt ? new Date(order.dispatchedAt).toLocaleDateString() : 'PENDING');
+                        return (
+                          <tr key={idx}>
+                            <td><strong>{order.orderCode}</strong></td>
+                            <td>{order.sourceLocation?.name?.toUpperCase() || 'UNKNOWN'}</td>
+                            <td>{order.items?.length || 0}</td>
+                            <td>{receptionDate}</td>
+                            <td>
+                              <span className={`status-pill ${getStatusColor(order.status)}`}>
+                                {order.status}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
                               <button 
                                 className="btn-action-sm received" 
-                                onClick={() => handleUpdateBillDirect(bill._id, { paymentStatus: 'PAID' })}
-                                title="Mark Paid"
+                                style={{ margin: '0 auto' }}
+                                onClick={() => {
+                                  setSelectedBill(order);
+                                  const qtys: Record<string, number> = {};
+                                  order.items.forEach((item: any) => {
+                                    qtys[item._id] = item.dispatchedQty - item.receivedQty;
+                                  });
+                                  setReceiveForm(qtys);
+                                  setSelectedForReceive({}); // Start unchecked
+                                  setShowReceiveModal(true);
+                                }}
                               >
-                                <DollarSign size={14} /> MARK PAID
+                                <Package size={14} /> OPEN
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-
-            {/* Manual Expenses Section */}
-            <div style={{ marginTop: '32px', borderTop: '1px solid var(--border-main)', paddingTop: '24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', padding: '0 16px' }}>
-                <h2 style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)', letterSpacing: '0.5px' }}>MANUAL EXPENSES LOG</h2>
+                            </td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
               </div>
-              <table className="sharp-table">
-                <thead>
-                  <tr>
-                    <th>DATE</th>
-                    <th>CATEGORY</th>
-                    <th>DESCRIPTION</th>
-                    <th>AMOUNT (₹)</th>
-                    <th>PAYMENT METHOD</th>
-                    <th>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-8 text-dim">No manual expenses logged.</td></tr>
-                  ) : (
-                    expenses.map((exp, idx) => {
-                      let statusClass = 'status-pending';
-                      if (exp.status === 'APPROVED') statusClass = 'status-paid';
-                      if (exp.status === 'REJECTED') statusClass = 'status-rejected';
-                      if (exp.status === 'PENDING_FINANCE') statusClass = 'status-billed';
-
-                      return (
-                        <tr key={idx}>
-                          <td>{new Date(exp.date).toLocaleDateString()}</td>
-                          <td><strong>{exp.category}</strong></td>
-                          <td>{exp.description}</td>
-                          <td>₹ {exp.amount.toFixed(2)}</td>
-                          <td>{exp.paymentMethod}</td>
-                          <td>
-                            <span className={`status-pill ${statusClass}`}>
-                              {exp.status.replace('_', ' ')}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ) : (
-          <div className="table-wrapper">
-            <table className="sharp-table">
-              <thead>
-                <tr>
-                  <th>PO CODE</th>
-                  <th>SENDING LOCATION</th>
-                  <th>NUMBER OF ITEMS</th>
-                  <th>DATE OF RECEPTION</th>
-                  <th>STATUS</th>
-                  <th style={{ textAlign: 'center' }}>ACTION</th>
-                </tr>
-              </thead>
-              <tbody>
-                {internalOrders.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-12 text-dim">No internal purchases found.</td></tr>
-                ) : (
-                  internalOrders.map((order: any, idx: number) => {
-                    const receptionDate = order.receivedAt 
-                      ? new Date(order.receivedAt).toLocaleDateString()
-                      : (order.dispatchedAt ? new Date(order.dispatchedAt).toLocaleDateString() : 'PENDING');
-                    return (
-                      <tr key={idx}>
-                        <td><strong>{order.orderCode}</strong></td>
-                        <td>{order.sourceLocation?.name?.toUpperCase() || 'UNKNOWN'}</td>
-                        <td>{order.items?.length || 0}</td>
-                        <td>{receptionDate}</td>
-                        <td>
-                          <span className={`status-pill ${getStatusColor(order.status)}`}>
-                            {order.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <button 
-                            className="btn-action-sm received" 
-                            style={{ margin: '0 auto' }}
-                            onClick={() => {
-                              setSelectedBill(order);
-                              const qtys: Record<string, number> = {};
-                              order.items.forEach((item: any) => {
-                                qtys[item._id] = item.dispatchedQty - item.receivedQty;
-                              });
-                              setReceiveForm(qtys);
-                              setSelectedForReceive({}); // Start unchecked
-                              setShowReceiveModal(true);
-                            }}
-                          >
-                            <Package size={14} /> OPEN
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+            )}
+          </>
         )}
       </div>
 
@@ -658,193 +730,372 @@ const PurchasePage: React.FC = () => {
 
 
       {/* Delivery Receipt Modal */}
-      {showReceiveModal && selectedBill && (
-        <div className="modal-overlay">
-          <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h2>{selectedBill.deliveryStatus === 'DELIVERED' ? 'VIEW DELIVERY' : 'ACCEPT DELIVERY'}</h2>
-              <button className="btn-close" onClick={() => setShowReceiveModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="bill-detail-card" style={{ marginBottom: '16px' }}>
-                <div className="bill-row">
-                  <label>{activeTab === 'INTERNAL' ? 'SOURCE KITCHEN' : 'VENDOR'}</label>
-                  <span>
-                    {activeTab === 'INTERNAL' 
-                      ? (selectedBill.sourceLocation?.name || 'UNKNOWN') 
-                      : (selectedBill.vendor?.vendorName || 'UNKNOWN')}
-                  </span>
-                </div>
+      {showReceiveModal && selectedBill && (() => {
+        const isCompleted = activeTab === 'INTERNAL' 
+          ? selectedBill.status === 'RECEIVED' 
+          : selectedBill.deliveryStatus === 'DELIVERED';
+          
+        const receivableItems = selectedBill.items.filter((i: any) => {
+          const pending = activeTab === 'INTERNAL' 
+            ? (i.dispatchedQty - i.receivedQty) 
+            : (i.quantity - (i.receivedQty || 0));
+          return pending > 0;
+        });
+        
+        const allSelected = receivableItems.length > 0 && receivableItems.every((i: any) => selectedForReceive[i._id]);
+        
+        const isOrderFullyReceived = selectedBill.items.every((i: any) => {
+          const pending = activeTab === 'INTERNAL' 
+            ? (i.dispatchedQty - i.receivedQty) 
+            : (i.quantity - (i.receivedQty || 0));
+          return pending <= 0;
+        });
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content workflow-modal" style={{ maxWidth: '750px', width: '100%' }}>
+              <div className="modal-header">
+                <h2>{isCompleted || isViewOnly || isOrderFullyReceived ? 'VIEW DELIVERY' : 'ACCEPT DELIVERY'}</h2>
+                <button className="btn-close" onClick={() => setShowReceiveModal(false)}>✕</button>
               </div>
-              <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
-                {activeTab === 'INTERNAL' 
-                  ? 'SELECT ITEMS AND QUANTITIES TO RECEIVE' 
-                  : 'VERIFY RECEIVED QUANTITIES (UPDATES INVENTORY)'}
-              </p>
-              <table className="mini-table">
-                <thead>
-                  <tr>
-                    {activeTab === 'INTERNAL' && <th style={{ textAlign: 'center', width: '50px' }}>SELECT</th>}
-                    <th>ITEM NAME</th>
-                    <th>{activeTab === 'INTERNAL' ? 'DISPATCHED QTY' : 'ORDERED QTY'}</th>
-                    <th>RECEIVED QTY</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedBill.items.map((i: any, idx: number) => {
-                    const maxQty = activeTab === 'INTERNAL' ? (i.dispatchedQty - i.receivedQty) : i.quantity;
-                    const idKey = activeTab === 'INTERNAL' ? i._id : i.item;
-                    if (activeTab === 'INTERNAL' && maxQty <= 0) return null;
-                    return (
-                      <tr key={idx}>
-                        {activeTab === 'INTERNAL' && (
-                          <td style={{ textAlign: 'center' }}>
-                            <input 
-                              type="checkbox"
-                              checked={selectedForReceive[i._id] || false}
-                              onChange={(e) => setSelectedForReceive({...selectedForReceive, [i._id]: e.target.checked})}
-                              disabled={isViewOnly}
-                              style={{ transform: 'scale(1.2)', cursor: isViewOnly ? 'not-allowed' : 'pointer' }}
-                            />
-                          </td>
+              <div className="modal-body">
+                <div className="premium-delivery-header-card" style={{ marginBottom: '20px', padding: '18px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-strong)', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        {activeTab === 'INTERNAL' ? (
+                          <span style={{ fontSize: '0.6rem', fontWeight: 800, background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
+                            INTERNAL TRANSFER
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.6rem', fontWeight: 800, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
+                            EXTERNAL VENDOR
+                          </span>
                         )}
-                        <td><strong>{i.itemName}</strong></td>
-                        <td>{maxQty}</td>
-                        <td>
-                          <input 
-                            type="number"
-                            value={receiveForm[idKey] ?? maxQty}
-                            onChange={(e) => setReceiveForm({...receiveForm, [idKey]: Number(e.target.value)})}
-                            disabled={(activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly}
-                            style={{ 
-                              width: '80px', 
-                              padding: '6px', 
-                              background: 'var(--bg-main)', 
-                              border: '1px solid var(--border-main)', 
-                              color: 'var(--text-main)', 
-                              outline: 'none',
-                              opacity: ((activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly) ? 0.5 : 1
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              {selectedBill.deliveryStatus === 'DELIVERED' || isViewOnly ? (
-                <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CLOSE</button>
-              ) : (
-                <>
-                  <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CANCEL</button>
-                  {activeTab === 'INTERNAL' && (
+                      </div>
+                      <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                        {activeTab === 'INTERNAL' ? 'SOURCE LOCATION' : 'VENDOR NAME'}
+                      </span>
+                      <strong style={{ fontSize: '1.25rem', color: 'var(--text-main)', fontFamily: "'Outfit', sans-serif" }}>
+                        {activeTab === 'INTERNAL' 
+                          ? (selectedBill.sourceLocation?.name?.toUpperCase() || 'UNKNOWN') 
+                          : (selectedBill.vendor?.vendorName?.toUpperCase() || 'UNKNOWN')}
+                      </strong>
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                      {selectedBill.purchaseRequest?.prCode && (
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>PR REFERENCE</span>
+                          <strong className="code-badge" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(249, 115, 22, 0.08)', color: 'var(--primary)', border: '1px solid rgba(249, 115, 22, 0.25)', fontSize: '0.75rem', fontWeight: 900 }}>
+                            {selectedBill.purchaseRequest.prCode}
+                          </strong>
+                        </div>
+                      )}
+                      {selectedBill.createdAt && (
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>
+                            ORDERED ON {new Date(selectedBill.createdAt).toLocaleDateString()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
+                  {activeTab === 'INTERNAL' 
+                    ? 'SELECT ITEMS AND QUANTITIES TO RECEIVE' 
+                    : 'VERIFY RECEIVED QUANTITIES (UPDATES INVENTORY)'}
+                </p>
+                
+                <table className="mini-table">
+                  <thead>
+                    <tr>
+                      {activeTab === 'INTERNAL' && (
+                        <th style={{ textAlign: 'center', width: '60px' }}>
+                          {!isViewOnly && !isCompleted && !isOrderFullyReceived ? (
+                            <label className="premium-checkbox-container" style={{ margin: '0 auto' }}>
+                              <input 
+                                type="checkbox"
+                                checked={allSelected}
+                                onChange={(e) => {
+                                  const checked = e.target.checked;
+                                  const updated = { ...selectedForReceive };
+                                  receivableItems.forEach((i: any) => {
+                                    updated[i._id] = checked;
+                                  });
+                                  setSelectedForReceive(updated);
+                                }}
+                              />
+                              <span className="premium-checkmark"></span>
+                            </label>
+                          ) : (
+                            'SELECT'
+                          )}
+                        </th>
+                      )}
+                      <th>ITEM NAME</th>
+                      <th>{activeTab === 'INTERNAL' ? 'DISPATCHED QTY' : 'ORDERED QTY'}</th>
+                      <th>RECEIVED QTY</th>
+                      <th>PENDING QTY</th>
+                      <th>RECEIVE NOW</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedBill.items.map((i: any, idx: number) => {
+                      const pendingQty = activeTab === 'INTERNAL' 
+                        ? (i.dispatchedQty - i.receivedQty) 
+                        : (i.quantity - (i.receivedQty || 0));
+                      const isCompletedItem = pendingQty <= 0;
+                      const idKey = activeTab === 'INTERNAL' ? i._id : i.item;
+                      
+                      const isSelected = activeTab === 'INTERNAL' ? (selectedForReceive[i._id] || false) : true;
+                      const enteredQty = isCompleted || isCompletedItem ? 0 : (receiveForm[idKey] ?? pendingQty);
+                      const hasMismatch = !isCompleted && !isCompletedItem && isSelected && (enteredQty !== pendingQty);
+                      const isPerfectMatch = !isCompleted && !isCompletedItem && isSelected && (enteredQty === pendingQty);
+                      
+                      let rowBg = 'transparent';
+                      let rowBorderLeft = 'none';
+                      if (isSelected && !isCompleted && !isCompletedItem) {
+                        if (hasMismatch) {
+                          rowBg = 'rgba(234, 179, 8, 0.04)';
+                          rowBorderLeft = '3px solid #eab308';
+                        } else if (isPerfectMatch && enteredQty > 0) {
+                          rowBg = 'rgba(16, 185, 129, 0.04)';
+                          rowBorderLeft = '3px solid #10b981';
+                        }
+                      }
+
+                      return (
+                        <tr key={idx} style={{ background: rowBg, borderLeft: rowBorderLeft, opacity: (isCompleted || isCompletedItem) ? 0.6 : 1 }}>
+                          {activeTab === 'INTERNAL' && (
+                            <td style={{ textAlign: 'center' }}>
+                              <label className="premium-checkbox-container">
+                                <input 
+                                  type="checkbox"
+                                  checked={!isCompletedItem && isSelected}
+                                  onChange={(e) => setSelectedForReceive({...selectedForReceive, [i._id]: e.target.checked})}
+                                  disabled={isCompleted || isCompletedItem || isViewOnly}
+                                />
+                                <span className="premium-checkmark" style={{ opacity: (isCompleted || isCompletedItem) ? 0.5 : 1 }}></span>
+                              </label>
+                            </td>
+                          )}
+                          <td>
+                            <strong>{i.itemName.toUpperCase()}</strong>
+                            {isCompleted || isCompletedItem ? (
+                              <span style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 800, marginLeft: '8px', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', border: '1px solid rgba(16, 185, 129, 0.2)', display: 'inline-block', verticalAlign: 'middle' }}>
+                                ✓ FULLY RECEIVED
+                              </span>
+                            ) : hasMismatch ? (
+                              <div style={{ fontSize: '0.6rem', color: '#eab308', fontWeight: 800, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                ⚠️ QUANTITY MISMATCH (DIFF: {(enteredQty - pendingQty).toFixed(2)})
+                              </div>
+                            ) : isSelected ? (
+                              <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 800, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                ✓ QUANTITIES MATCH PERFECTLY
+                              </div>
+                            ) : null}
+                          </td>
+                          <td>
+                            <strong>
+                              {activeTab === 'INTERNAL' ? i.dispatchedQty : i.quantity} {i.unit?.toUpperCase() || 'PCS'}
+                            </strong>
+                          </td>
+                          <td>
+                            <strong>
+                              {i.receivedQty || 0} {i.unit?.toUpperCase() || 'PCS'}
+                            </strong>
+                          </td>
+                          <td>
+                            <strong>
+                              {pendingQty} {i.unit?.toUpperCase() || 'PCS'}
+                            </strong>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="number"
+                                value={isCompleted || isCompletedItem ? 0 : enteredQty}
+                                onChange={(e) => setReceiveForm({...receiveForm, [idKey]: Number(e.target.value)})}
+                                disabled={(activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || isCompleted || isCompletedItem || isViewOnly}
+                                max={pendingQty}
+                                min="0"
+                                style={{ 
+                                  width: '80px', 
+                                  padding: '6px', 
+                                  background: 'var(--bg-main)', 
+                                  border: hasMismatch ? '1px solid #eab308' : '1px solid var(--border-main)', 
+                                  color: hasMismatch ? '#eab308' : 'var(--text-main)', 
+                                  outline: 'none',
+                                  fontWeight: 900,
+                                  opacity: ((activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || isCompleted || isCompletedItem || isViewOnly) ? 0.5 : 1
+                                }}
+                              />
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 800 }}>{i.unit?.toUpperCase() || 'PCS'}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                {isCompleted || isViewOnly || isOrderFullyReceived ? (
+                  <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CLOSE</button>
+                ) : (
+                  <>
+                    <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CANCEL</button>
+                    {activeTab === 'INTERNAL' && (
+                      <button 
+                        className="btn-action-sm" 
+                        disabled 
+                        style={{ background: '#ef4444', color: 'white', opacity: 0.5, cursor: 'not-allowed' }}
+                      >
+                        REJECT DELIVERY
+                      </button>
+                    )}
                     <button 
-                      className="btn-action-sm" 
-                      disabled 
-                      style={{ background: '#ef4444', color: 'white', opacity: 0.5, cursor: 'not-allowed' }}
+                      className="btn-premium-accept" 
+                      onClick={handleConfirmReceive} 
+                      disabled={isProcessing || (activeTab === 'INTERNAL' && Object.keys(selectedForReceive).filter(k => selectedForReceive[k]).length === 0)}
                     >
-                      REJECT DELIVERY
+                      {isProcessing ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                          <span className="spinner-loader"></span>
+                          PROCESSING...
+                        </span>
+                      ) : (
+                        <>
+                          <Package size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                          ACCEPT DELIVERY
+                        </>
+                      )}
                     </button>
-                  )}
-                  <button 
-                    className="btn-action-sm received" 
-                    onClick={handleConfirmReceive} 
-                    disabled={isProcessing || (activeTab === 'INTERNAL' && Object.keys(selectedForReceive).filter(k => selectedForReceive[k]).length === 0)}
-                  >
-                    {isProcessing ? 'PROCESSING...' : 'ACCEPT DELIVERY'}
-                  </button>
-                </>
-              )}
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
 
 
       {/* Add Expense Modal */}
       {showExpenseModal && (
         <div className="modal-overlay">
-          <div className="modal-content">
+          <div className="modal-content premium-expense-modal" style={{ maxWidth: '650px', width: '100%' }}>
             <div className="modal-header">
-              <h2>MANUALLY RECORD EXPENSE</h2>
+              <h2>
+                <Coins size={18} style={{ color: 'var(--primary)', marginRight: '8px', verticalAlign: 'middle' }} />
+                MANUALLY RECORD EXPENSE
+              </h2>
               <button className="close-btn" onClick={() => setShowExpenseModal(false)}>&times;</button>
             </div>
             <form onSubmit={handleSubmitExpense}>
-              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div className="input-group">
-                  <label>EXPENSE DATE</label>
-                  <input 
-                    type="date" 
-                    value={expenseForm.date} 
-                    onChange={e => setExpenseForm(prev => ({ ...prev, date: e.target.value }))}
-                    required
-                  />
+              <div className="modal-body expense-grid-body">
+                
+                {/* Row 1: Date and Category */}
+                <div className="expense-row-two-col">
+                  <div className="input-group-premium">
+                    <label>
+                      <Calendar size={12} style={{ marginRight: '6px' }} />
+                      EXPENSE DATE
+                    </label>
+                    <input 
+                      type="date" 
+                      value={expenseForm.date} 
+                      onChange={e => setExpenseForm(prev => ({ ...prev, date: e.target.value }))}
+                      required
+                      className="premium-input-field"
+                    />
+                  </div>
+                  <div className="input-group-premium">
+                    <label>
+                      <Tag size={12} style={{ marginRight: '6px' }} />
+                      CATEGORY
+                    </label>
+                    <select 
+                      value={expenseForm.category} 
+                      onChange={e => setExpenseForm(prev => ({ ...prev, category: e.target.value }))}
+                      required
+                      className="premium-select-field"
+                    >
+                      {expenseCategories.length === 0 ? (
+                        <option value="">No categories available</option>
+                      ) : (
+                        expenseCategories.map(cat => (
+                          <option key={cat._id} value={cat.categoryName}>
+                            {cat.categoryName.toUpperCase()}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
                 </div>
-                <div className="input-group">
-                  <label>CATEGORY</label>
-                  <select 
-                    value={expenseForm.category} 
-                    onChange={e => setExpenseForm(prev => ({ ...prev, category: e.target.value }))}
-                    required
-                  >
-                    {[
-                      'Transport- Food',
-                      'Petrol Expenses',
-                      'Staff travelling Expenses',
-                      'Staff Welfare Expenses',
-                      'Cleaning Charges',
-                      'Repair and Maintenance',
-                      'Consumable Purchase',
-                      'Rent',
-                      'Gas',
-                      'Electricity Charges',
-                      'Water Charges'
-                    ].map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
+
+                {/* Row 2: Amount and Payment Method */}
+                <div className="expense-row-two-col">
+                  <div className="input-group-premium">
+                    <label>
+                      <DollarSign size={12} style={{ marginRight: '6px' }} />
+                      AMOUNT (₹)
+                    </label>
+                    <div className="premium-input-wrapper">
+                      <span className="currency-prefix">₹</span>
+                      <input 
+                        type="number" 
+                        placeholder="0.00"
+                        value={expenseForm.amount || ''} 
+                        onChange={e => setExpenseForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
+                        min="0.01"
+                        step="0.01"
+                        required
+                        className="premium-input-field with-prefix"
+                      />
+                    </div>
+                  </div>
+                  <div className="input-group-premium">
+                    <label>
+                      <CreditCard size={12} style={{ marginRight: '6px' }} />
+                      PAYMENT METHOD
+                    </label>
+                    <select 
+                      value={expenseForm.paymentMethod} 
+                      onChange={e => setExpenseForm(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                      required
+                      className="premium-select-field"
+                    >
+                      {['Cash'].map(m => (
+                        <option key={m} value={m}>{m.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                <div className="input-group">
-                  <label>DESCRIPTION</label>
+
+                {/* Row 3: Description (Full Width) */}
+                <div className="input-group-premium full-width">
+                  <label>
+                    <FileText size={12} style={{ marginRight: '6px' }} />
+                    DESCRIPTION
+                  </label>
                   <input 
                     type="text" 
                     placeholder="Enter details about this expense..."
                     value={expenseForm.description} 
                     onChange={e => setExpenseForm(prev => ({ ...prev, description: e.target.value }))}
                     required
+                    className="premium-input-field"
                   />
                 </div>
-                <div className="input-group">
-                  <label>AMOUNT (₹)</label>
-                  <input 
-                    type="number" 
-                    placeholder="0.00"
-                    value={expenseForm.amount || ''} 
-                    onChange={e => setExpenseForm(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                    min="0.01"
-                    step="0.01"
-                    required
-                  />
-                </div>
-                <div className="input-group">
-                  <label>PAYMENT METHOD</label>
-                  <select 
-                    value={expenseForm.paymentMethod} 
-                    onChange={e => setExpenseForm(prev => ({ ...prev, paymentMethod: e.target.value }))}
-                    required
-                  >
-                    {['Cash'].map(m => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
-                </div>
+
               </div>
-              <div className="modal-footer">
-                <button type="button" className="btn-cancel" onClick={() => setShowExpenseModal(false)}>CANCEL</button>
-                <button type="submit" className="btn-save" disabled={isProcessing}>
+              <div className="modal-footer premium-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button type="button" className="btn-cancel-premium" onClick={() => setShowExpenseModal(false)}>CANCEL</button>
+                <button type="submit" className="btn-save-premium" disabled={isProcessing}>
                   {isProcessing ? 'SAVING...' : 'RECORD EXPENSE'}
                 </button>
               </div>
@@ -926,6 +1177,184 @@ const PurchasePage: React.FC = () => {
         .bill-management-form select, .bill-management-form input { background: var(--bg-main); border: 1px solid var(--border-main); color: var(--text-main); padding: 12px; font-weight: 800; }
 
         .text-primary { color: var(--primary); font-weight: 800; }
+
+        /* Premium Modals and Inputs Styling */
+        .expense-grid-body {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+          padding: 24px;
+        }
+        .expense-row-two-col {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
+        }
+        .input-group-premium {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .input-group-premium.full-width {
+          grid-column: span 2;
+        }
+        .input-group-premium label {
+          font-size: 0.65rem;
+          font-weight: 800;
+          color: var(--text-muted);
+          letter-spacing: 0.8px;
+          display: flex;
+          align-items: center;
+          text-transform: uppercase;
+        }
+        .premium-input-field, .premium-select-field {
+          background: var(--bg-input);
+          border: 1px solid var(--border-main);
+          padding: 10px 14px;
+          color: var(--text-main);
+          font-size: 0.85rem;
+          font-weight: 500;
+          width: 100%;
+          outline: none;
+          transition: all 0.2s ease-in-out;
+        }
+        .premium-input-field:focus, .premium-select-field:focus {
+          border-color: var(--primary);
+          box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15);
+        }
+        .premium-input-wrapper {
+          position: relative;
+          display: flex;
+          align-items: center;
+        }
+        .currency-prefix {
+          position: absolute;
+          left: 14px;
+          font-size: 0.85rem;
+          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .premium-input-field.with-prefix {
+          padding-left: 30px;
+        }
+        .btn-cancel-premium {
+          background: rgba(255, 255, 255, 0.05);
+          border: 1px solid var(--border-main);
+          color: var(--text-muted);
+          padding: 10px 20px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: 0.2s;
+        }
+        .btn-cancel-premium:hover {
+          background: rgba(255, 255, 255, 0.1);
+          color: var(--text-main);
+        }
+        .btn-save-premium {
+          background: var(--primary);
+          border: none;
+          color: white;
+          padding: 10px 24px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: 0.2s;
+        }
+        .btn-save-premium:hover:not(:disabled) {
+          background: var(--primary-dark);
+          transform: translateY(-1px);
+        }
+        .btn-save-premium:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+
+        /* Custom styled checkbox overlay */
+        .premium-checkbox-container {
+          display: inline-block;
+          position: relative;
+          width: 20px;
+          height: 20px;
+          cursor: pointer;
+          user-select: none;
+        }
+        .premium-checkbox-container input {
+          position: absolute;
+          opacity: 0;
+          cursor: pointer;
+          height: 0;
+          width: 0;
+        }
+        .premium-checkmark {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 20px;
+          width: 20px;
+          background-color: var(--bg-input);
+          border: 1px solid var(--border-strong);
+          transition: all 0.2s;
+        }
+        .premium-checkbox-container:hover input ~ .premium-checkmark {
+          border-color: var(--primary);
+        }
+        .premium-checkbox-container input:checked ~ .premium-checkmark {
+          background-color: var(--primary);
+          border-color: var(--primary);
+        }
+        .premium-checkmark:after {
+          content: "";
+          position: absolute;
+          display: none;
+        }
+        .premium-checkbox-container input:checked ~ .premium-checkmark:after {
+          display: block;
+        }
+        .premium-checkbox-container .premium-checkmark:after {
+          left: 6px;
+          top: 2px;
+          width: 5px;
+          height: 10px;
+          border: solid white;
+          border-width: 0 2px 2px 0;
+          transform: rotate(45deg);
+        }
+
+        /* Premium Accept Delivery button & animations */
+        .btn-premium-accept {
+          background: #10b981;
+          color: white;
+          border: none;
+          padding: 10px 24px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-premium-accept:hover:not(:disabled) {
+          background: #059669;
+          transform: scale(1.03);
+          box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+        }
+        .btn-premium-accept:active:not(:disabled) {
+          transform: scale(0.98);
+        }
+        .btn-premium-accept:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .spinner-loader {
+          width: 12px;
+          height: 12px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-radius: 50%;
+          border-top-color: white;
+          animation: spin 0.6s linear infinite;
+        }
       `}</style>
     </MainLayout>
   );

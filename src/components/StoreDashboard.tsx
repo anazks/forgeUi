@@ -160,7 +160,6 @@ const StoreDashboard: React.FC = () => {
                   <th>STATUS</th>
                   <th>CODE</th>
                   <th>ITEM NAME</th>
-                  <th>VENDOR</th>
                   <th>MIN. STOCK</th>
                   <th>TOTAL STOCK (ALL LOCATIONS)</th>
                   <th>LOCATIONS</th>
@@ -190,7 +189,6 @@ const StoreDashboard: React.FC = () => {
                           <span>{m.name.toUpperCase()}</span>
                         </div>
                       </td>
-                      <td className="vendor-cell">{m.vendorName || <span className="dim">—</span>}</td>
                       <td>
                         <span className="min-stock">{m.minimumStock} {unit}</span>
                       </td>

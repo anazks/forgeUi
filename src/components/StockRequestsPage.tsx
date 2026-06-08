@@ -116,6 +116,12 @@ const StockRequestsPage: React.FC = () => {
       return;
     }
 
+    const zeroPriceItem = selectedItems.find(i => !unitPrices[`${i.materialId}-${i.locationId}`] || Number(unitPrices[`${i.materialId}-${i.locationId}`]) <= 0);
+    if (zeroPriceItem) {
+      showToast(`Please specify a valid unit price greater than 0 for "${zeroPriceItem.name}".`, 'error');
+      return;
+    }
+
     let groupedByVendorAndLoc: Record<string, any> = {};
     try {
       setIsBulkProcessing(true);
@@ -333,6 +339,7 @@ const StockRequestsPage: React.FC = () => {
                     <th>SL NO</th>
                     <th>ITEM NAME (LOCATION)</th>
                     <th>CURRENT STOCK</th>
+                    <th>MINIMUM STOCK</th>
                     <th>REQUESTED STOCK</th>
                     <th>GAP</th>
                     <th>ORDER QTY</th>
@@ -343,7 +350,7 @@ const StockRequestsPage: React.FC = () => {
                 </thead>
                 <tbody>
                   {actionableItems.filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation).length === 0 ? (
-                    <tr><td colSpan={9} className="text-center py-12 text-dim">No demands found.</td></tr>
+                    <tr><td colSpan={10} className="text-center py-12 text-dim">No demands found.</td></tr>
                   ) : (
                     actionableItems
                       .filter((item: any) => selectedLocation === 'ALL' || item.locationId === selectedLocation)
@@ -360,6 +367,7 @@ const StockRequestsPage: React.FC = () => {
                               <div style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>{locName.toUpperCase()}</div>
                             </td>
                             <td>{item.stock.toFixed(2)} {item.unit?.toUpperCase()}</td>
+                            <td>{item.moq.toFixed(2)} {item.unit?.toUpperCase()}</td>
                             <td>{(item.requestedStock ?? item.demand).toFixed(2)} {item.unit?.toUpperCase()}</td>
                             <td style={{ color: (item.displayGap ?? item.gap) > 0 ? '#ef4444' : 'inherit', fontWeight: 900 }}>{(item.displayGap ?? item.gap).toFixed(2)} {item.unit?.toUpperCase()}</td>
                             <td>

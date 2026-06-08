@@ -442,17 +442,21 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
             </button>
             {isCenters && (
               <>
-                <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
-                  <MenuSquare size={18} /><span>Menu</span>
-                </button>
-                {user?.role !== 'AGGREGATE' && (
+                {user?.role !== 'KITCHEN' && (
+                  <button className={`nav-item ${isActive('/menu', 'menu') ? 'active' : ''}`} onClick={() => navTo('/menu', 'menu')}>
+                    <MenuSquare size={18} /><span>New Request</span>
+                  </button>
+                )}
+                {user?.role !== 'AGGREGATE' && user?.role !== 'KITCHEN' && (
                   <button className={`nav-item ${isActive('/function-bookings', 'function-bookings') ? 'active' : ''}`} onClick={() => navTo('/function-bookings', 'function-bookings')}>
                     <ClipboardList size={18} /><span>Function Bookings</span>
                   </button>
                 )}
-                <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
-                  <UtensilsCrossed size={18} /><span>My Requests</span>
-                </button>
+                {user?.role !== 'KITCHEN' && (
+                  <button className={`nav-item ${isActive('/food-requests', 'food-requests') ? 'active' : ''}`} onClick={() => navTo('/food-requests', 'food-requests')}>
+                    <UtensilsCrossed size={18} /><span>My Requests</span>
+                  </button>
+                )}
                 <button className={`nav-item ${isActive('/inventory', 'inventory') ? 'active' : ''}`} onClick={() => navTo('/inventory', 'inventory')}>
                   <Package size={18} /><span>Inventory</span>
                 </button>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { foodRequestApi, userApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
@@ -18,6 +18,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const FoodRequestPage: React.FC = () => {
+  const navigate = useNavigate();
   const { entityId } = useParams<{ entityId: string }>();
 
   // Mock data for immediate visibility
@@ -64,6 +65,12 @@ const FoodRequestPage: React.FC = () => {
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
+
+  useEffect(() => {
+    if (user && user.role === 'KITCHEN') {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
   const isViewOnly = queryParams.get('viewOnly') === 'true' || user?.role === 'ADMIN';
@@ -540,7 +547,6 @@ const FoodRequestPage: React.FC = () => {
                                           <thead>
                                             <tr>
                                               <th>ITEM NAME</th>
-                                              <th>CODE</th>
                                               <th>QTY</th>
                                               <th>EDIT QTY</th>
                                               <th>STATUS</th>
@@ -553,7 +559,6 @@ const FoodRequestPage: React.FC = () => {
                                               return (
                                                 <tr key={rowKey}>
                                                   <td>{item.materialName}</td>
-                                                  <td><code>{item.simpleCode}</code></td>
                                                   <td><strong>{item.requestedQty} {item.unit}</strong></td>
                                                   <td>
                                                     {item.approvalStatus === 'APPROVED' && !isViewOnly ? (
@@ -677,7 +682,6 @@ const FoodRequestPage: React.FC = () => {
                             <thead>
                               <tr>
                                 <th>ITEM</th>
-                                <th>CODE</th>
                                 <th>REQUESTED</th>
                                 <th>UNIT</th>
                                 <th>RECEIVED</th>
@@ -688,7 +692,6 @@ const FoodRequestPage: React.FC = () => {
                               {req.requestedItems.map((item: any, i: number) => (
                                 <tr key={i}>
                                   <td><strong>{item.materialName}</strong></td>
-                                  <td><span className="code-sm">{item.simpleCode || '—'}</span></td>
                                   <td>{item.requestedQty}</td>
                                   <td>{item.unit}</td>
                                   <td>{item.receivedQty ?? '—'}</td>

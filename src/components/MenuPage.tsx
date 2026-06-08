@@ -4,15 +4,22 @@ import { menuApi, bomApi, userApi, foodRequestApi, functionOrderApi } from '../s
 import { ITEM_CATEGORIES } from '../constants/categories';
 import ForgeLoader from './ForgeLoader';
 import { Plus, Search, Loader2, X, Edit2, Trash2, BookOpen, ClipboardList, CheckSquare, Square, Send, ShoppingCart } from 'lucide-react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 
 type TabType = 'all' | 'direct' | 'bom';
 
 const MenuPage: React.FC = () => {
+  const navigate = useNavigate();
   const { entityId } = useParams<{ entityId: string }>();
   const [menus, setMenus] = useState<any[]>([]);
   const [boms, setBoms] = useState<any[]>([]);
   const [user, setUser] = useState<any>(null);
+
+  useEffect(() => {
+    if (user && user.role === 'KITCHEN') {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -37,6 +44,19 @@ const MenuPage: React.FC = () => {
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   // Accumulate pending requests across multiple interactions
   const [pendingRequest, setPendingRequest] = useState<Record<string, { item: any; qty: number }>>({}); // key = "_id"
+  const [manuallyAddedUnlistedIds, setManuallyAddedUnlistedIds] = useState<Set<string>>(new Set());
+  const [isUnlistedModalOpen, setIsUnlistedModalOpen] = useState(false);
+  const [selectedUnlistedIds, setSelectedUnlistedIds] = useState<Set<string>>(new Set());
+  const [placedQuantities, setPlacedQuantities] = useState<Record<string, number>>({});
+  const [isLoadingPlaced, setIsLoadingPlaced] = useState(false);
+  const [foSearchTerm, setFoSearchTerm] = useState('');
+  const [showFoSuggestions, setShowFoSuggestions] = useState(false);
+  const [foEditingDishId, setFoEditingDishId] = useState<string | null>(null);
+  const [foEditingDishQty, setFoEditingDishQty] = useState<number>(0);
+  const [foEditingDetails, setFoEditingDetails] = useState(false);
+  const [foEditDateVal, setFoEditDateVal] = useState('');
+  const [foEditAdvanceVal, setFoEditAdvanceVal] = useState(0);
+  const [foEditAdvanceModeVal, setFoEditAdvanceModeVal] = useState('Cash');
 
   // Ordering state
   const [orderQtys, setOrderQtys] = useState<Record<string, number>>({});
@@ -158,6 +178,7 @@ const MenuPage: React.FC = () => {
       setSelectedFo(res.data.data);
       setSuccess('Dish added to function order!');
       setFoSelectedItem('');
+      setFoSearchTerm('');
       setFoSelectedQty(1);
       await fetchFunctionOrders();
       setTimeout(() => setSuccess(''), 2000);
@@ -182,6 +203,26 @@ const MenuPage: React.FC = () => {
     }
   };
 
+  const handleUpdateDishQty = async (dishId: string, newQty: number) => {
+    if (!selectedFo || newQty <= 0) return;
+    const dishesCopy = (selectedFo.dishes || []).map((d: any) => {
+      if (d._id === dishId) {
+        return { ...d, qty: newQty };
+      }
+      return d;
+    });
+    try {
+      const res = await functionOrderApi.updateDishes(selectedFo._id, dishesCopy);
+      setSelectedFo(res.data.data);
+      await fetchFunctionOrders();
+      setFoEditingDishId(null);
+      setFoEditingDishQty(0);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to update dish quantity');
+      setTimeout(() => setError(''), 4000);
+    }
+  };
+
   const handleSaveTotalValue = async (val: number) => {
     if (!selectedFo) return;
     try {
@@ -193,6 +234,32 @@ const MenuPage: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to update total order value');
       setTimeout(() => setError(''), 4000);
+    }
+  };
+
+  const handleUpdateEventDetails = async () => {
+    if (!selectedFo) return;
+    if (!foEditDateVal) {
+      setError('Event date is required');
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+      const res = await functionOrderApi.update(selectedFo._id, {
+        eventDate: foEditDateVal,
+        advanceAmount: foEditAdvanceVal,
+        advancePaymentMode: foEditAdvanceModeVal
+      });
+      setSelectedFo(res.data.data);
+      setSuccess('Event details updated successfully!');
+      setFoEditingDetails(false);
+      await fetchFunctionOrders();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to update event details');
+      setTimeout(() => setError(''), 4000);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -276,39 +343,73 @@ const MenuPage: React.FC = () => {
     }
   };
 
+  const isRequestPage = React.useMemo(() => {
+    return ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && viewMode === 'regular';
+  }, [user, viewMode]);
+
   // ── Build display lists ──────────────────────────────────────────────
   // DIRECT: all items from menus array (no type filter needed)
-  const directItems = menus.map(m => {
-    return { ...m, _source: 'DIRECT' };
-  });
+  const directItems = React.useMemo(() => {
+    return menus.map(m => {
+      return { ...m, _source: 'DIRECT' };
+    });
+  }, [menus]);
 
   // BOM: from boms array — each BOM dish appears as a BOM-source item
-  const bomItems = boms.map(b => {
-    return {
-      _id: b._id,
-      _source: 'BOM',
-      name: b.dishName,
-      unit: b.unit || 'pcs',
-      customUnit: '',
-      ingredientCount: b.items?.length || 0,
-      createdAt: b.createdAt,
-    };
-  });
+  const bomItems = React.useMemo(() => {
+    return boms.map(b => {
+      const subBoms = (b.items || [])
+        .filter((item: any) => item.type === 'BOM Item')
+        .map((item: any) => item.itemName);
+
+      return {
+        _id: b._id,
+        _source: 'BOM',
+        name: b.dishName,
+        unit: b.unit || 'pcs',
+        customUnit: '',
+        ingredientCount: b.items?.length || 0,
+        createdAt: b.createdAt,
+        isSoldB2C: b.isSoldB2C !== false,
+        subBoms
+      };
+    });
+  }, [boms]);
+
+  const visibleBoms = React.useMemo(() => {
+    return bomItems.filter(b => {
+      if (isRequestPage) {
+        return b.isSoldB2C !== false || manuallyAddedUnlistedIds.has(b._id);
+      }
+      return true;
+    });
+  }, [bomItems, isRequestPage, manuallyAddedUnlistedIds]);
 
   // Merge and sort A–Z
-  const allItems = [...directItems, ...bomItems].sort((a, b) =>
-    (a.name || '').localeCompare(b.name || '')
-  );
+  const allItems = React.useMemo(() => {
+    return [...directItems, ...visibleBoms].sort((a, b) =>
+      (a.name || '').localeCompare(b.name || '')
+    );
+  }, [directItems, visibleBoms]);
+
+  const filteredFoSearchItems = React.useMemo(() => {
+    if (!foSearchTerm) return allItems;
+    return allItems.filter(item =>
+      item.name?.toLowerCase().includes(foSearchTerm.toLowerCase())
+    );
+  }, [allItems, foSearchTerm]);
 
   const directCount = directItems.length;
-  const bomCount = bomItems.length;
+  const bomCount = visibleBoms.length;
 
-  const filtered = allItems.filter(item => {
-    const matchSearch = item.name?.toLowerCase().includes(searchTerm.toLowerCase());
-    if (activeTab === 'direct') return matchSearch && item._source === 'DIRECT';
-    if (activeTab === 'bom') return matchSearch && item._source === 'BOM';
-    return matchSearch;
-  });
+  const filtered = React.useMemo(() => {
+    return allItems.filter(item => {
+      const matchSearch = item.name?.toLowerCase().includes(searchTerm.toLowerCase());
+      if (activeTab === 'direct') return matchSearch && item._source === 'DIRECT';
+      if (activeTab === 'bom') return matchSearch && item._source === 'BOM';
+      return matchSearch;
+    });
+  }, [allItems, searchTerm, activeTab]);
 
   const handleQtyChange = (itemId: string, qty: string) => {
     setOrderQtys(prev => ({
@@ -328,7 +429,7 @@ const MenuPage: React.FC = () => {
   };
 
   // BUG-C1: Open confirm modal — merge new qtys into pendingRequest accumulator
-  const handleOpenConfirmModal = () => {
+  const handleOpenConfirmModal = async () => {
     if (selectedItems.size === 0) {
       setError('Please select at least one item and enter a quantity.');
       setTimeout(() => setError(''), 3000);
@@ -339,6 +440,37 @@ const MenuPage: React.FC = () => {
       setError('Please enter a quantity for at least one selected item.');
       setTimeout(() => setError(''), 3000);
       return;
+    }
+
+    try {
+      setIsLoadingPlaced(true);
+      const centerId = user?._id || user?.id;
+      const res = await foodRequestApi.getAll(entityId, centerId);
+      const allRequests = res.data.data || [];
+      
+      const selectedDateStr = new Date(deliveryDate).toDateString();
+      const matchingRequests = allRequests.filter((req: any) => {
+        return req.status !== 'REJECTED' && req.deliveryDate && new Date(req.deliveryDate).toDateString() === selectedDateStr;
+      });
+
+      const qtyMap: Record<string, number> = {};
+      for (const req of matchingRequests) {
+        if (req.requestedItems) {
+          for (const item of req.requestedItems) {
+            if (item.approvalStatus !== 'REJECTED') {
+              const key = (item.bomId && (typeof item.bomId === 'object' ? item.bomId._id : item.bomId)) || item.menuId;
+              if (key) {
+                qtyMap[key.toString()] = (qtyMap[key.toString()] || 0) + (item.requestedQty || 0);
+              }
+            }
+          }
+        }
+      }
+      setPlacedQuantities(qtyMap);
+    } catch (err) {
+      console.error('Failed to fetch placed requests:', err);
+    } finally {
+      setIsLoadingPlaced(false);
     }
 
     // Merge into pending accumulator
@@ -478,12 +610,12 @@ const MenuPage: React.FC = () => {
     <MainLayout>
       <header className="page-header">
         <div className="header-title">
-          <h1>{viewMode === 'functions' ? 'FUNCTION BOOKINGS' : (user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? 'NEW REQUEST' : 'MENU MANAGEMENT')}</h1>
+          <h1>{viewMode === 'functions' ? 'FUNCTION BOOKINGS' : (['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) ? 'NEW REQUEST' : 'MENU MANAGEMENT')}</h1>
           <p className="subtitle">
-            {viewMode === 'functions' ? 'MANAGE EVENT ORDERS, ADVANCE PAYMENTS AND DISH REQUESTS' : (user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? 'SELECT ITEMS, ENTER QUANTITIES AND SUBMIT REQUEST' : 'PRODUCT CATALOG — DIRECT & BOM DISHES')}
+            {viewMode === 'functions' ? 'MANAGE EVENT ORDERS, ADVANCE PAYMENTS AND DISH REQUESTS' : (['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) ? 'SELECT ITEMS, ENTER QUANTITIES AND SUBMIT REQUEST' : 'PRODUCT CATALOG — DIRECT & BOM DISHES')}
           </p>
         </div>
-        {(user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && viewMode === 'regular' && (
+        {['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && viewMode === 'regular' && (
           <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div className="header-date-picker" style={{ margin: 0 }}>
               <label style={{ fontSize: '0.65rem', marginRight: '6px', fontWeight: 800 }}>DELIVERY DATE:</label>
@@ -495,9 +627,16 @@ const MenuPage: React.FC = () => {
                 style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px', color: 'var(--text-main)' }}
               />
             </div>
+            <button 
+              className="btn-primary" 
+              onClick={() => setIsUnlistedModalOpen(true)}
+              style={{ padding: '8px 16px', fontSize: '0.75rem', height: 'fit-content' }}
+            >
+              + ADD UNLISTED ITEM
+            </button>
           </div>
         )}
-        {viewMode === 'regular' && user?.role !== 'CENTERS' && user?.role !== 'RESTAURANT' && (
+        {viewMode === 'regular' && !['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && (
           <button className="btn-primary" onClick={openCreateModal}>
             <Plus size={16} /> ADD MENU ITEM
           </button>
@@ -507,7 +646,7 @@ const MenuPage: React.FC = () => {
       {error && !isModalOpen && <div className="error-message">{error}</div>}
       {success && <div className="success-banner">{success}</div>}
 
-      {viewMode !== 'functions' && (
+      {viewMode !== 'functions' && !['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && (
         <div className="info-banner" style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.2)', color: '#60a5fa', padding: '12px 20px', fontSize: '0.8rem', fontWeight: 600, marginBottom: '20px' }}>
           <div style={{ fontWeight: 800, marginBottom: '4px' }}>💡 Menu Guidelines:</div>
           <ol style={{ margin: 0, paddingLeft: '20px', lineHeight: '1.4' }}>
@@ -518,24 +657,26 @@ const MenuPage: React.FC = () => {
       )}
 
       {/* Summary Strip */}
-      <div className="menu-summary">
-        <div className="msm-stat">
-          <span className="msm-val">{allItems.length}</span>
-          <span className="msm-label">TOTAL ITEMS</span>
+      {viewMode !== 'functions' && (
+        <div className="menu-summary">
+          <div className="msm-stat">
+            <span className="msm-val">{allItems.length}</span>
+            <span className="msm-label">TOTAL ITEMS</span>
+          </div>
+          <div className="msm-divider" />
+          <div className="msm-stat">
+            <BookOpen size={14} />
+            <span className="msm-val">{directCount}</span>
+            <span className="msm-label">DIRECT</span>
+          </div>
+          <div className="msm-divider" />
+          <div className="msm-stat">
+            <ClipboardList size={14} />
+            <span className="msm-val">{bomCount}</span>
+            <span className="msm-label">FROM BOM</span>
+          </div>
         </div>
-        <div className="msm-divider" />
-        <div className="msm-stat">
-          <BookOpen size={14} />
-          <span className="msm-val">{directCount}</span>
-          <span className="msm-label">DIRECT</span>
-        </div>
-        <div className="msm-divider" />
-        <div className="msm-stat">
-          <ClipboardList size={14} />
-          <span className="msm-val">{bomCount}</span>
-          <span className="msm-label">FROM BOM</span>
-        </div>
-      </div>
+      )}
 
       <div className="data-panel">
         {viewMode === 'functions' ? (
@@ -544,7 +685,7 @@ const MenuPage: React.FC = () => {
             <div style={{ width: '30%', borderRight: '1px solid var(--border-main)', paddingRight: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-main)', letterSpacing: '0.5px', margin: 0 }}>EVENT BOOKINGS</h3>
-                {(user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly && (
+                {['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly && (
                   <button 
                     className="btn-primary" 
                     onClick={() => {
@@ -641,6 +782,38 @@ const MenuPage: React.FC = () => {
                         <span style={{ fontSize: '0.7rem', opacity: 0.7, color: 'var(--text-dim)' }}>({selectedFo.foCode})</span>
                       </div>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '4px', marginBottom: 0 }}>{selectedFo.description}</p>
+                      {selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly && (
+                        <div style={{ marginTop: '8px' }}>
+                          {foEditingDetails ? (
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button 
+                                onClick={handleUpdateEventDetails}
+                                style={{ background: 'var(--primary)', border: 'none', color: 'white', padding: '4px 10px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 800, borderRadius: '2px' }}
+                              >
+                                SAVE DETAILS
+                              </button>
+                              <button 
+                                onClick={() => setFoEditingDetails(false)}
+                                style={{ background: 'transparent', border: '1px solid var(--border-main)', color: 'var(--text-dim)', padding: '4px 10px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 800, borderRadius: '2px' }}
+                              >
+                                CANCEL
+                              </button>
+                            </div>
+                          ) : (
+                            <button 
+                              onClick={() => {
+                                setFoEditingDetails(true);
+                                setFoEditDateVal(selectedFo.eventDate ? selectedFo.eventDate.split('T')[0] : '');
+                                setFoEditAdvanceVal(selectedFo.advanceAmount || 0);
+                                setFoEditAdvanceModeVal(selectedFo.advancePaymentMode || 'Cash');
+                              }}
+                              style={{ background: 'transparent', border: '1px solid var(--border-main)', color: 'var(--primary)', padding: '4px 10px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 800, borderRadius: '2px' }}
+                            >
+                              EDIT DETAILS
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <span className={`status-pill status-${selectedFo.status.toLowerCase().replace('_', '')}`} style={{ fontSize: '0.7rem', padding: '4px 10px', borderRadius: '2px' }}>
@@ -654,12 +827,35 @@ const MenuPage: React.FC = () => {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
                     <div style={{ background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 800 }}>ADVANCE PAID</div>
-                      <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>₹{selectedFo.advanceAmount}</div>
-                      <div style={{ fontSize: '0.55rem', color: 'var(--primary)', marginTop: '2px', fontWeight: 800 }}>Mode: {selectedFo.advancePaymentMode}</div>
+                      {foEditingDetails ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                          <input 
+                            type="number"
+                            value={foEditAdvanceVal}
+                            onChange={(e) => setFoEditAdvanceVal(Number(e.target.value))}
+                            style={{ width: '100%', padding: '4px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 900 }}
+                          />
+                          <select 
+                            value={foEditAdvanceModeVal}
+                            onChange={(e) => setFoEditAdvanceModeVal(e.target.value)}
+                            style={{ width: '100%', padding: '4px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '0.75rem', fontWeight: 800 }}
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="UPI">UPI</option>
+                            <option value="Card">Card</option>
+                            <option value="Bank Transfer">Bank Transfer</option>
+                          </select>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: '1.1rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>₹{selectedFo.advanceAmount}</div>
+                          <div style={{ fontSize: '0.55rem', color: 'var(--primary)', marginTop: '2px', fontWeight: 800 }}>Mode: {selectedFo.advancePaymentMode}</div>
+                        </>
+                      )}
                     </div>
                     <div style={{ background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 800 }}>TOTAL ORDER VALUE</div>
-                      {selectedFo.status === 'OPEN' && (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly ? (
+                      {selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly ? (
                         <div style={{ display: 'flex', gap: '4px', alignItems: 'center', marginTop: '4px' }}>
                           <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>₹</span>
                           <input
@@ -679,7 +875,16 @@ const MenuPage: React.FC = () => {
                     </div>
                     <div style={{ background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px' }}>
                       <div style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 800 }}>EVENT DATE</div>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>{new Date(selectedFo.eventDate).toLocaleDateString()}</div>
+                      {foEditingDetails ? (
+                        <input 
+                          type="date"
+                          value={foEditDateVal}
+                          onChange={(e) => setFoEditDateVal(e.target.value)}
+                          style={{ width: '100%', padding: '4px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '0.85rem', fontWeight: 800, marginTop: '4px' }}
+                        />
+                      ) : (
+                        <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>{new Date(selectedFo.eventDate).toLocaleDateString()}</div>
+                      )}
                     </div>
                   </div>
 
@@ -687,19 +892,63 @@ const MenuPage: React.FC = () => {
                   <div>
                     <h3 style={{ fontSize: '0.75rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px', letterSpacing: '0.5px' }}>DISHES INCLUDED</h3>
                     
-                    {selectedFo.status === 'OPEN' && (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly && (
-                      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px' }}>
-                        <div style={{ flex: 1 }}>
-                          <select 
-                            value={foSelectedItem}
-                            onChange={(e) => setFoSelectedItem(e.target.value)}
+                    {selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly && (
+                      <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', background: 'var(--bg-sidebar)', padding: '12px', border: '1px solid var(--border-main)', borderRadius: '4px', position: 'relative' }}>
+                        <div style={{ flex: 1, position: 'relative' }}>
+                          <input 
+                            type="text"
+                            placeholder="TYPE DISH NAME OR SEARCH..."
+                            value={foSearchTerm}
+                            onChange={(e) => {
+                              setFoSearchTerm(e.target.value);
+                              setFoSelectedItem('');
+                              setShowFoSuggestions(true);
+                            }}
+                            onFocus={() => setShowFoSuggestions(true)}
+                            onBlur={() => setTimeout(() => setShowFoSuggestions(false), 200)}
                             style={{ width: '100%', padding: '8px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none' }}
-                          >
-                            <option value="">SELECT DISH / ITEM...</option>
-                            {allItems.map(i => (
-                              <option key={i._id} value={i._id}>{i.name.toUpperCase()} ({i._source})</option>
-                            ))}
-                          </select>
+                          />
+                          {showFoSuggestions && (
+                            <div style={{ 
+                              position: 'absolute', 
+                              top: '100%', 
+                              left: 0, 
+                              right: 0, 
+                              background: 'var(--bg-sidebar)', 
+                              border: '1px solid var(--border-main)', 
+                              maxHeight: '200px', 
+                              overflowY: 'auto', 
+                              zIndex: 50,
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+                            }}>
+                              {filteredFoSearchItems.map(i => (
+                                <div 
+                                  key={i._id}
+                                  onMouseDown={() => {
+                                    setFoSelectedItem(i._id);
+                                    setFoSearchTerm(`${i.name.toUpperCase()} (${i._source})`);
+                                    setShowFoSuggestions(false);
+                                  }}
+                                  style={{ 
+                                    padding: '8px 12px', 
+                                    cursor: 'pointer', 
+                                    borderBottom: '1px solid var(--border-main)',
+                                    fontSize: '0.75rem',
+                                    background: foSelectedItem === i._id ? 'rgba(249,115,22,0.15)' : 'transparent',
+                                    color: 'var(--text-main)'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span><strong>{i.name.toUpperCase()}</strong></span>
+                                    <span className={`source-tag ${i._source === 'BOM' ? 'bom' : 'direct'}`} style={{ fontSize: '0.55rem' }}>{i._source}</span>
+                                  </div>
+                                </div>
+                              ))}
+                              {filteredFoSearchItems.length === 0 && (
+                                <div style={{ padding: '8px 12px', color: 'var(--text-dim)', fontSize: '0.75rem' }}>No matching items.</div>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div style={{ width: '100px' }}>
                           <input 
@@ -716,40 +965,150 @@ const MenuPage: React.FC = () => {
                       </div>
                     )}
 
-                    <table className="mini-table" style={{ margin: 0 }}>
-                      <thead>
-                        <tr>
-                          <th>ITEM NAME</th>
-                          <th>QTY</th>
-                          <th>UNIT</th>
-                          {selectedFo.status === 'OPEN' && (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly && <th style={{ width: '80px', textAlign: 'center' }}>ACTION</th>}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(selectedFo.dishes || []).length === 0 ? (
-                          <tr><td colSpan={selectedFo.status === 'OPEN' && !isViewOnly ? 4 : 3} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-dim)' }}>No dishes added to this booking yet.</td></tr>
-                        ) : (
-                          (selectedFo.dishes || []).map((dish: any) => (
-                            <tr key={dish._id || dish.itemName}>
-                              <td><strong>{dish.itemName}</strong></td>
-                              <td>{dish.qty}</td>
-                              <td>{dish.unit}</td>
-                              {selectedFo.status === 'OPEN' && (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly && (
-                                <td style={{ textAlign: 'center' }}>
-                                  <button className="btn-remove" onClick={() => handleRemoveDishFromFo(dish._id)}>
-                                    <Trash2 size={13} />
-                                  </button>
-                                </td>
-                              )}
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {(selectedFo.dishes || []).length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '30px', color: 'var(--text-dim)', border: '1px dashed var(--border-main)', borderRadius: '4px' }}>
+                          No dishes added to this booking yet.
+                        </div>
+                      ) : (
+                        (selectedFo.dishes || []).map((dish: any) => {
+                          const matchedBom = boms.find(b => b._id === dish.bomId);
+                          const subBoms = matchedBom 
+                            ? (matchedBom.items || [])
+                                .filter((item: any) => item.type === 'BOM Item')
+                                .map((item: any) => item.itemName)
+                            : [];
+                          return (
+                            <div 
+                              key={dish._id || dish.itemName}
+                              style={{ 
+                                display: 'flex', 
+                                alignItems: 'center', 
+                                justifyContent: 'space-between', 
+                                padding: '12px 16px', 
+                                background: 'var(--bg-sidebar)', 
+                                border: '1px solid var(--border-main)', 
+                                borderRadius: '4px',
+                                gap: '16px'
+                              }}
+                            >
+                              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <strong style={{ fontSize: '0.85rem', color: 'var(--text-main)' }}>{dish.itemName.toUpperCase()}</strong>
+                                  <span style={{ fontSize: '0.65rem', background: 'rgba(249,115,22,0.1)', color: 'var(--primary)', border: '1px solid rgba(249,115,22,0.2)', padding: '2px 6px', fontWeight: 800, textTransform: 'uppercase' }}>
+                                    {(dish.unit || 'PCS').toUpperCase()}
+                                  </span>
+                                </div>
+                                {subBoms.length > 0 && (
+                                  <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', fontStyle: 'italic', textTransform: 'uppercase' }}>
+                                    Ingredients: {subBoms.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)' }}>QTY:</span>
+                                  {foEditingDishId === dish._id && selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly ? (
+                                    <input 
+                                      type="number"
+                                      min="1"
+                                      value={foEditingDishQty}
+                                      onChange={(e) => setFoEditingDishQty(Number(e.target.value))}
+                                      style={{ width: '70px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '0.75rem', fontWeight: 800, textAlign: 'center' }}
+                                    />
+                                  ) : (
+                                    <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-main)' }}>{dish.qty}</span>
+                                  )}
+                                </div>
+
+                                {selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly && (
+                                  <div style={{ display: 'flex', gap: '6px' }}>
+                                    {foEditingDishId === dish._id ? (
+                                      <>
+                                        <button
+                                          onClick={() => handleUpdateDishQty(dish._id, foEditingDishQty)}
+                                          style={{ 
+                                            background: 'var(--primary)', 
+                                            border: 'none', 
+                                            color: 'white',
+                                            padding: '4px 10px', 
+                                            cursor: 'pointer', 
+                                            fontSize: '0.65rem',
+                                            fontWeight: 800,
+                                            borderRadius: '2px'
+                                          }}
+                                          title="Save Quantity"
+                                        >
+                                          SAVE
+                                        </button>
+                                        <button
+                                          onClick={() => { setFoEditingDishId(null); setFoEditingDishQty(0); }}
+                                          style={{ 
+                                            background: 'transparent', 
+                                            border: '1px solid var(--border-main)', 
+                                            color: 'var(--text-dim)',
+                                            padding: '4px 10px', 
+                                            cursor: 'pointer', 
+                                            fontSize: '0.65rem',
+                                            fontWeight: 800,
+                                            borderRadius: '2px'
+                                          }}
+                                          title="Cancel"
+                                        >
+                                          CANCEL
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => { setFoEditingDishId(dish._id); setFoEditingDishQty(dish.qty); }}
+                                          style={{ 
+                                            background: 'transparent', 
+                                            border: '1px solid var(--border-main)', 
+                                            color: 'var(--primary)',
+                                            padding: '4px 10px', 
+                                            cursor: 'pointer', 
+                                            fontSize: '0.65rem',
+                                            fontWeight: 800,
+                                            borderRadius: '2px'
+                                          }}
+                                          title="Edit Quantity"
+                                        >
+                                          EDIT
+                                        </button>
+                                        <button 
+                                          className="btn-remove"
+                                          onClick={() => handleRemoveDishFromFo(dish._id)}
+                                          style={{ 
+                                            background: 'none', 
+                                            border: '1px solid var(--border-main)', 
+                                            padding: '6px', 
+                                            cursor: 'pointer', 
+                                            display: 'flex', 
+                                            alignItems: 'center', 
+                                            justifyContent: 'center',
+                                            transition: '0.2s',
+                                            color: 'var(--text-dim)'
+                                          }}
+                                          title="Remove Dish"
+                                        >
+                                          <Trash2 size={13} />
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
 
                   {/* Place request button */}
-                  {selectedFo.status === 'OPEN' && (user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && !isViewOnly && (
+                  {selectedFo.status === 'OPEN' && ['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && !isViewOnly && (
                     <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border-main)', paddingTop: '16px' }}>
                       <button 
                         className="btn-primary" 
@@ -806,7 +1165,7 @@ const MenuPage: React.FC = () => {
               <div className="table-wrapper">
 
                 {/* BUG-C1: Bulk action bar for Center/Restaurant users */}
-                {(user?.role === 'CENTERS' || user?.role === 'RESTAURANT') && (
+                {['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) && (
                   <div className="bulk-request-bar">
                     <span className="bulk-count">
                       <CheckSquare size={14} />
@@ -828,7 +1187,7 @@ const MenuPage: React.FC = () => {
                       <th>SOURCE</th>
                       <th style={{ textAlign: 'left' }}>ITEM / DISH NAME</th>
                       <th>UNIT</th>
-                      {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
+                      {['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) ? (
                         <>
                           <th style={{ width: '150px' }}>REQUEST QTY</th>
                           <th style={{ width: '140px', textAlign: 'center' }}>SELECT TO REQUEST</th>
@@ -853,13 +1212,18 @@ const MenuPage: React.FC = () => {
                         </td>
                         <td style={{ textAlign: 'left' }}>
                           <strong className="item-name">{item.name?.toUpperCase()}</strong>
+                          {item._source === 'BOM' && item.subBoms && item.subBoms.length > 0 && (
+                            <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '4px', fontStyle: 'italic', textTransform: 'uppercase' }}>
+                              Ingredients: {item.subBoms.join(', ')}
+                            </div>
+                          )}
                         </td>
                         <td>
                           <span className="unit-tag">
                             {(item.unit === 'custom' ? item.customUnit : item.unit)?.toUpperCase() || '—'}
                           </span>
                         </td>
-                        {user?.role === 'CENTERS' || user?.role === 'RESTAURANT' ? (
+                        {['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user?.role) ? (
                           <>
                             <td>
                               <input
@@ -930,34 +1294,68 @@ const MenuPage: React.FC = () => {
       {/* BUG-C1: Request Confirm Modal */}
       {confirmModalOpen && (
         <div className="modal-overlay">
-          <div className="modal-content confirm-request-modal">
-            <button className="close-btn" onClick={() => setConfirmModalOpen(false)}><X size={20} /></button>
-            <div className="modal-tag" style={{color:'var(--primary)', borderColor:'rgba(249,115,22,0.3)', background:'rgba(249,115,22,0.05)'}}>
-              <ShoppingCart size={12} /> REQUEST SUMMARY
-            </div>
-            <h2>Confirm Order Request</h2>
-            <p style={{fontSize:'0.8rem', color:'var(--text-dim)', marginBottom:'16px'}}>
-              Review the total quantities below. Quantities include any previously added items for this request session.
-            </p>
-            <div className="confirm-items-list">
-              {Object.values(pendingRequest).filter(e => e.qty > 0).map(e => (
-                <div key={e.item._id} className="confirm-item-row">
-                  <div className="ci-info">
-                    <span className={`source-tag ${e.item._source === 'BOM' ? 'bom' : 'direct'}`}>{e.item._source}</span>
-                    <strong>{e.item.name?.toUpperCase()}</strong>
-                  </div>
-                  <div className="ci-qty">
-                    <span className="qty-badge">{e.qty}</span>
-                    <span className="ci-unit">{e.item.unit === 'custom' ? e.item.customUnit : e.item.unit}</span>
-                  </div>
+          <div className="modal-content confirm-request-modal" style={{ maxWidth: '550px', borderRadius: '8px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.5)' }}>
+            <button className="close-btn" onClick={() => setConfirmModalOpen(false)} style={{ top: '24px', right: '24px' }}><X size={20} /></button>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-main)', paddingBottom: '16px' }}>
+              <div>
+                <div className="modal-tag" style={{ color: 'var(--primary)', borderColor: 'rgba(249,115,22,0.3)', background: 'rgba(249,115,22,0.05)', margin: '0 0 8px 0', width: 'fit-content' }}>
+                  <ShoppingCart size={12} style={{ marginRight: '4px' }} /> REQUEST SUMMARY
                 </div>
-              ))}
+                <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>Confirm Order Request</h2>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', fontWeight: 800, letterSpacing: '0.5px', marginTop: '4px', textTransform: 'uppercase' }}>
+                  Delivery Date: <span style={{ color: 'var(--primary)' }}>{new Date(deliveryDate).toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' })}</span>
+                </div>
+              </div>
             </div>
-            <div className="cdm-actions" style={{marginTop:'24px'}}>
+
+            <div className="confirm-items-list" style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '380px', overflowY: 'auto' }}>
+              {isLoadingPlaced ? (
+                <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '40px', color: 'var(--text-dim)' }}>
+                  <Loader2 size={24} className="animate-spin" style={{ marginRight: '10px' }} />
+                  <span>Loading existing requests...</span>
+                </div>
+              ) : (
+                Object.values(pendingRequest).filter(e => e.qty > 0).map(e => {
+                  const alreadyPlaced = placedQuantities[e.item._id] || 0;
+                  const unitStr = (e.item.unit === 'custom' ? e.item.customUnit : e.item.unit)?.toUpperCase() || 'UNIT';
+                  return (
+                    <div key={e.item._id} style={{ display: 'flex', flexDirection: 'column', gap: '8px', border: '1px solid var(--border-main)', background: 'var(--bg-sidebar)', padding: '16px', borderRadius: '6px' }}>
+                      <div className="ci-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                          <span className={`source-tag ${e.item._source === 'BOM' ? 'bom' : 'direct'}`} style={{ marginTop: '2px' }}>{e.item._source}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <strong style={{ fontSize: '0.9rem', color: 'var(--text-main)' }}>{e.item.name?.toUpperCase()}</strong>
+                            {e.item._source === 'BOM' && e.item.subBoms && e.item.subBoms.length > 0 && (
+                              <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)', fontStyle: 'italic', marginTop: '2px', textTransform: 'uppercase' }}>
+                                Ingredients: {e.item.subBoms.join(', ')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', fontSize: '0.75rem', border: '1px solid rgba(255,255,255,0.05)' }}>
+                          <span style={{ color: 'var(--text-dim)' }}>Already Placed</span>
+                          <span style={{ fontWeight: 700, color: alreadyPlaced > 0 ? 'var(--primary)' : 'var(--text-dim)' }}>{alreadyPlaced} {unitStr}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(249,115,22,0.04)', borderRadius: '4px', fontSize: '0.75rem', border: '1px solid rgba(249,115,22,0.1)' }}>
+                          <span style={{ color: 'var(--text-main)', fontWeight: 600 }}>New Request</span>
+                          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>+{e.qty} {unitStr}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            
+            <div className="cdm-actions" style={{ marginTop: '24px', borderTop: '1px solid var(--border-main)', paddingTop: '20px' }}>
               <button className="btn-cancel-modal" onClick={() => setConfirmModalOpen(false)} disabled={isSubmitting}>
                 <X size={14} /> CANCEL
               </button>
-              <button className="btn-confirm-close" style={{background:'var(--primary)'}} onClick={handleConfirmRequest} disabled={isSubmitting}>
+              <button className="btn-confirm-close" style={{ background: 'var(--primary)' }} onClick={handleConfirmRequest} disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
                 {isSubmitting ? 'SUBMITTING...' : 'CONFIRM & SUBMIT'}
               </button>
@@ -965,6 +1363,70 @@ const MenuPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Add Unlisted Items Modal */}
+      {isUnlistedModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal-content confirm-request-modal" style={{ maxWidth: '500px' }}>
+            <button className="close-btn" onClick={() => { setIsUnlistedModalOpen(false); setSelectedUnlistedIds(new Set()); }}><X size={20} /></button>
+            <div className="modal-tag direct-tag" style={{ color: '#a855f7', borderColor: 'rgba(168,85,247,0.3)', background: 'rgba(168,85,247,0.06)' }}>
+              <ClipboardList size={12} /> UNLISTED ITEMS
+            </div>
+            <h2>Add Unlisted Items</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '16px' }}>
+              Select items that are not sold B2C to temporarily add them to your request form.
+            </p>
+            <div className="confirm-items-list" style={{ maxHeight: '300px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {bomItems.filter(b => b.isSoldB2C === false && !manuallyAddedUnlistedIds.has(b._id)).length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-dim)', fontSize: '0.8rem' }}>
+                  No unlisted items available to add.
+                </div>
+              ) : (
+                bomItems.filter(b => b.isSoldB2C === false && !manuallyAddedUnlistedIds.has(b._id)).map(b => (
+                  <label key={b._id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)', cursor: 'pointer', borderRadius: '4px', margin: 0 }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800 }}>{b.name.toUpperCase()}</span>
+                    <input
+                      type="checkbox"
+                      checked={selectedUnlistedIds.has(b._id)}
+                      onChange={() => {
+                        setSelectedUnlistedIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(b._id)) next.delete(b._id);
+                          else next.add(b._id);
+                          return next;
+                        });
+                      }}
+                      style={{ width: '16px', height: '16px', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                    />
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="cdm-actions" style={{ marginTop: '24px' }}>
+              <button className="btn-cancel-modal" onClick={() => { setIsUnlistedModalOpen(false); setSelectedUnlistedIds(new Set()); }}>
+                CANCEL
+              </button>
+              <button 
+                className="btn-confirm-close" 
+                style={{ background: 'var(--primary)' }} 
+                onClick={() => {
+                  setManuallyAddedUnlistedIds(prev => {
+                    const next = new Set(prev);
+                    selectedUnlistedIds.forEach(id => next.add(id));
+                    return next;
+                  });
+                  setIsUnlistedModalOpen(false);
+                  setSelectedUnlistedIds(new Set());
+                }}
+                disabled={selectedUnlistedIds.size === 0}
+              >
+                ADD SELECTED
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add / Edit Direct Menu Item Modal */}
       {isModalOpen && (
         <div className="modal-overlay">
@@ -1265,7 +1727,7 @@ const MenuPage: React.FC = () => {
 
             <div style={{ marginBottom: '20px' }}>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '12px' }}>
-                Please select the delivery date for this function order. This will generate a request that flows to production and will be delivered to your location.
+                Please select the delivery date for this function order.
               </p>
               
               <div className="standard-form">

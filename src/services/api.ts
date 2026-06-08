@@ -161,6 +161,7 @@ export const eventApi = {
 export const expenseCategoryApi = {
   getAll: (entityId?: string) => api.get(`/expense-categories${entityId ? `?entity=${entityId}` : ''}`),
   create: (data: any) => api.post('/expense-categories', data),
+  update: (id: string, data: any) => api.put(`/expense-categories/${id}`, data),
   delete: (id: string) => api.delete(`/expense-categories/${id}`),
 };
 
@@ -217,7 +218,7 @@ export const revenueApi = {
     }
     return api.get(url);
   },
-  confirmTab: (data: { date: string; tabType: string; salesData: any; centerId?: string }) =>
+  confirmTab: (data: { date: string; tabType: string; salesData: any; isDraft?: boolean; centerId?: string }) =>
     api.post(`/revenue/daily/confirm-tab${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
   closeDaily: (data: { date: string; centerId?: string }) =>
     api.post(`/revenue/daily/close${data.centerId ? `?centerId=${data.centerId}` : ''}`, data),
@@ -257,11 +258,14 @@ export const expenseApi = {
 export const functionOrderApi = {
   create: (data: any) => api.post('/function-orders', data),
   getAll: (status?: string) => api.get(status ? `/function-orders?status=${status}` : '/function-orders'),
+  update: (id: string, data: any) => api.put(`/function-orders/${id}`, data),
   updateDishes: (id: string, dishes: any[]) => api.put(`/function-orders/${id}/dishes`, { dishes }),
   setTotalValue: (id: string, totalOrderValue: number) => api.put(`/function-orders/${id}/total-value`, { totalOrderValue }),
-  placeRequest: (id: string, deliveryDate: string) => api.post(`/function-orders/${id}/place-request`, { deliveryDate }),
+  placeRequest: (id: string, deliveryDate: string) => api.put(`/function-orders/${id}/place-request`, { deliveryDate }),
   settle: (id: string, data: { paymentMode: string; paymentAmount: number }) => api.put(`/function-orders/${id}/settle`, data),
   acknowledge: (id: string, note?: string) => api.put(`/function-orders/${id}/acknowledge`, { note }),
+  acknowledgeAdvance: (id: string, note?: string) => api.put(`/function-orders/${id}/acknowledge-advance`, { note }),
+  acknowledgeFinal: (id: string, note?: string) => api.put(`/function-orders/${id}/acknowledge-final`, { note }),
   getPendingFinance: () => api.get('/function-orders/pending-finance'),
 };
 

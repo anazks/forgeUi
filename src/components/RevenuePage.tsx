@@ -112,6 +112,7 @@ const RevenuePage: React.FC = () => {
   const [mB2cStock, setMB2cStock] = useState<number>(0);
   const [mB2cQty, setMB2cQty] = useState<number>(0);
   const [mB2cRate, setMB2cRate] = useState<number>(0);
+  const [isRateAutoResolved, setIsRateAutoResolved] = useState(false);
 
   useEffect(() => {
     fetchInitialSetup();
@@ -287,11 +288,21 @@ const RevenuePage: React.FC = () => {
   };
 
   // ─── B2C Manual Add Modal Handlers ─────────────────────────────────────
+  const closeB2cModal = () => {
+    setMB2cItemId('');
+    setMB2cStock(0);
+    setMB2cQty(0);
+    setMB2cRate(0);
+    setIsRateAutoResolved(false);
+    setIsB2cModalOpen(false);
+  };
+
   const handleMB2cSelect = (itemVal: string) => {
     setMB2cItemId(itemVal);
     if (!itemVal) {
       setMB2cRate(0);
       setMB2cStock(0);
+      setIsRateAutoResolved(false);
       return;
     }
     const [id, type] = itemVal.split('|');
@@ -302,14 +313,15 @@ const RevenuePage: React.FC = () => {
       if (!rateDoc) {
         rateDoc = rates.find(r => r.bom?._id === id && !r.center);
       }
-      setMB2cRate(rateDoc ? (rateDoc.centerRate || rateDoc.rate || 0) : 0);
+      const price = rateDoc ? (rateDoc.centerRate || rateDoc.rate || 0) : 0;
+      setMB2cRate(price);
+      setIsRateAutoResolved(price > 0);
       setMB2cStock(0);
     } else {
-      let rateDoc = rates.find(r => r.menu?._id === id && (r.center?._id === targetLoc || r.center === targetLoc));
-      if (!rateDoc) {
-        rateDoc = rates.find(r => r.menu?._id === id && !r.center);
-      }
-      setMB2cRate(rateDoc ? (rateDoc.centerRate || rateDoc.rate || 0) : 0);
+      const selected = allMenus.find(m => m._id === id);
+      const price = selected ? (selected.mrpPrice || 0) : 0;
+      setMB2cRate(price);
+      setIsRateAutoResolved(price > 0);
       setMB2cStock(0);
     }
   };
@@ -361,12 +373,7 @@ const RevenuePage: React.FC = () => {
       ]);
     }
 
-    // Reset and close
-    setMB2cItemId('');
-    setMB2cStock(0);
-    setMB2cQty(0);
-    setMB2cRate(0);
-    setIsB2cModalOpen(false);
+    closeB2cModal();
   };
 
   const handleB2bPriceChange = (index: number, val: string) => {
@@ -420,8 +427,7 @@ const RevenuePage: React.FC = () => {
     updated[index].totalVal = updated[index].soldQty * price;
     setB2cItems(updated);
   };
-
-  const handleConfirmTab = async (tabType: TabType) => {
+  const handleConfirmTab = async (tabType: TabType, isDraft: boolean = false) => {
     try {
       setIsSubmitting(true);
       setError('');
@@ -431,7 +437,7 @@ const RevenuePage: React.FC = () => {
       if (tabType === 'b2b') {
         // Validate unit prices
         const invalid = b2bItems.find(item => !item.unitPrice || item.unitPrice <= 0);
-        if (invalid && b2bItems.length > 0) {
+        if (invalid && b2bItems.length > 0 && !isDraft) {
           setError(`Item "${invalid.itemName}" requires a positive unit price before confirmation`);
           setIsSubmitting(false);
           return;
@@ -451,23 +457,30 @@ const RevenuePage: React.FC = () => {
         date: selectedDate,
         tabType,
         salesData,
+        isDraft,
         centerId: isAdminRole() ? selectedLocationId : undefined
       });
 
-      setSuccess(`${tabType.toUpperCase()} sales details confirmed successfully.`);
-      if (tabType === 'b2b') setLocalB2bConfirmed(true);
-      if (tabType === 'b2c') setLocalB2cConfirmed(true);
-      if (tabType === 'online') setLocalOnlineConfirmed(true);
+      if (isDraft) {
+        setSuccess(`${tabType.toUpperCase()} sales draft saved successfully.`);
+        if (tabType === 'b2b') setLocalB2bConfirmed(false);
+        if (tabType === 'b2c') setLocalB2cConfirmed(false);
+        if (tabType === 'online') setLocalOnlineConfirmed(false);
+      } else {
+        setSuccess(`${tabType.toUpperCase()} sales details confirmed successfully.`);
+        if (tabType === 'b2b') setLocalB2bConfirmed(true);
+        if (tabType === 'b2c') setLocalB2cConfirmed(true);
+        if (tabType === 'online') setLocalOnlineConfirmed(true);
+      }
 
       const targetLoc = isAdminRole() ? selectedLocationId : currentUser._id;
       fetchDailyRevenue(targetLoc, selectedDate);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Failed to confirm sales data');
+      setError(err.response?.data?.error || 'Failed to save sales data');
     } finally {
       setIsSubmitting(false);
     }
   };
-
   const handleCloseDay = async () => {
     // BUG-R2: confirmation is now handled by closeConfirmOpen modal, not window.confirm
     setCloseConfirmOpen(false);
@@ -1054,11 +1067,16 @@ const RevenuePage: React.FC = () => {
 
             {!localB2cConfirmed && !isReadOnly && (
               <div className="panel-actions">
-                <button className="btn-confirm-tab" onClick={() => handleConfirmTab('b2c')} disabled={isSubmitting}>
-                  <Save size={14} /> CONFIRM B2C SALES
+                <button 
+                  className="btn-confirm-tab" 
+                  onClick={() => handleConfirmTab('b2c')} 
+                  disabled={isSubmitting}
+                >
+                  <Save size={14} /> SAVE
                 </button>
               </div>
             )}
+
           </div>
         )}
 
@@ -1503,7 +1521,7 @@ const RevenuePage: React.FC = () => {
       {isB2cModalOpen && (
         <div className="modal-overlay">
           <div className="modal-content rate-modal">
-            <button className="close-btn" onClick={() => setIsB2cModalOpen(false)}><X size={20} /></button>
+            <button className="close-btn" onClick={closeB2cModal}><X size={20} /></button>
             <h2>Add B2C Counter Sale Manually</h2>
             <form onSubmit={handleSaveMB2c} className="standard-form">
               <div className="form-group">
@@ -1563,6 +1581,7 @@ const RevenuePage: React.FC = () => {
                   min="0" 
                   step="0.01" 
                   required 
+                  disabled={isRateAutoResolved}
                 />
               </div>
               <div className="form-group">

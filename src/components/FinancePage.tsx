@@ -16,9 +16,9 @@ import {
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
-import { financeApi, userApi, bankApi, purchaseApi } from '../services/api';
+import { financeApi, userApi, bankApi, purchaseApi, functionOrderApi } from '../services/api';
 
-type TopTabType = 'dashboard' | 'location' | 'banks' | 'stock_purchases';
+type TopTabType = 'dashboard' | 'location' | 'banks' | 'stock_purchases' | 'function_orders';
 type LogTabType = 'b2c' | 'b2b';
 
 const FinancePage: React.FC = () => {
@@ -26,6 +26,10 @@ const FinancePage: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<TopTabType>('location');
   const [logTab, setLogTab] = useState<LogTabType>('b2c');
+  const [foSubTab, setFoSubTab] = useState<'advances' | 'final_payments'>('advances');
+  const [pendingAdvances, setPendingAdvances] = useState<any[]>([]);
+  const [pendingFinalPayments, setPendingFinalPayments] = useState<any[]>([]);
+  const [foNotes, setFoNotes] = useState<Record<string, string>>({});
   
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
@@ -82,6 +86,53 @@ const FinancePage: React.FC = () => {
     }
   };
 
+  const fetchPendingFunctionOrders = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      const res = await functionOrderApi.getPendingFinance();
+      setPendingAdvances(res.data.data.pendingAdvances || []);
+      setPendingFinalPayments(res.data.data.pendingFinalPayments || []);
+    } catch (err) {
+      console.error(err);
+      setError('Failed to fetch pending function orders for reconciliation');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAcknowledgeAdvance = async (orderId: string, note?: string) => {
+    try {
+      setIsSubmitting(true);
+      setError('');
+      setSuccess('');
+      await functionOrderApi.acknowledgeAdvance(orderId, note);
+      setSuccess('Advance payment acknowledged successfully!');
+      fetchPendingFunctionOrders();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to acknowledge advance payment');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAcknowledgeFinalPayment = async (orderId: string, note?: string) => {
+    try {
+      setIsSubmitting(true);
+      setError('');
+      setSuccess('');
+      await functionOrderApi.acknowledgeFinal(orderId, note);
+      setSuccess('Final payment acknowledged successfully!');
+      fetchPendingFunctionOrders();
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Failed to acknowledge final payment');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Parse parameters from search query
   const searchParams = new URLSearchParams(routerLocation.search);
   const tabParam = searchParams.get('tab') as TopTabType || 'location';
@@ -110,6 +161,8 @@ const FinancePage: React.FC = () => {
       fetchBanks();
     } else if (activeTab === 'stock_purchases') {
       fetchBills();
+    } else if (activeTab === 'function_orders') {
+      fetchPendingFunctionOrders();
     }
   }, [activeTab, selectedLocationId]);
 
@@ -318,6 +371,14 @@ const FinancePage: React.FC = () => {
             style={{ background: 'none', border: 'none', borderBottom: activeTab === 'stock_purchases' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'stock_purchases' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
           >
             STOCK PURCHASES
+          </button>
+
+          <button 
+            className={`tab-link ${activeTab === 'function_orders' ? 'active' : ''}`}
+            onClick={() => setActiveTab('function_orders')}
+            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'function_orders' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'function_orders' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
+          >
+            FUNCTION ORDERS
           </button>
         </div>
 
@@ -1010,6 +1071,174 @@ const FinancePage: React.FC = () => {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── TAB 5: FUNCTION ORDERS RECONCILIATION ───────────────────── */}
+        {activeTab === 'function_orders' && (
+          <div className="finance-tab-content">
+            <div className="panel">
+              <div className="panel-header" style={{ justifyContent: 'space-between', borderBottom: 'none', paddingBottom: '0px' }}>
+                <h2>RECONCILIATION FOR FUNCTION / EVENT ORDERS</h2>
+              </div>
+
+              <div className="sub-tabs-header" style={{ marginTop: '12px' }}>
+                <button 
+                  className={`sub-tab-btn ${foSubTab === 'advances' ? 'active' : ''}`}
+                  onClick={() => setFoSubTab('advances')}
+                >
+                  ADVANCE PAYMENTS RECONCILIATION ({pendingAdvances.length})
+                </button>
+                <button 
+                  className={`sub-tab-btn ${foSubTab === 'final_payments' ? 'active' : ''}`}
+                  onClick={() => setFoSubTab('final_payments')}
+                >
+                  SETTLEMENT / FINAL PAYMENTS ({pendingFinalPayments.length})
+                </button>
+              </div>
+
+              <div style={{ padding: '20px' }}>
+                {foSubTab === 'advances' && (
+                  <div className="table-wrapper scroll-inside">
+                    <table className="sharp-table">
+                      <thead>
+                        <tr>
+                          <th>FO CODE</th>
+                          <th>LOCATION</th>
+                          <th>BOOKING DATE</th>
+                          <th>PAYMENT MODE</th>
+                          <th>ADVANCE AMOUNT</th>
+                          <th>ACKNOWLEDGMENT NOTE</th>
+                          <th style={{ textAlign: 'right' }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingAdvances.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="empty-state">No pending advance payments to reconcile.</td>
+                          </tr>
+                        ) : (
+                          pendingAdvances.map((order) => (
+                            <tr key={order._id}>
+                              <td><strong>{order.foCode}</strong></td>
+                              <td>{order.centerId?.name?.toUpperCase() || 'UNKNOWN'}</td>
+                              <td>{new Date(order.bookingDate).toLocaleDateString()}</td>
+                              <td>
+                                <span className={`category-tag`}>
+                                  {order.advancePaymentMode || 'N/A'}
+                                </span>
+                              </td>
+                              <td className="font-numeric">₹ {(order.advanceAmount || 0).toFixed(2)}</td>
+                              <td>
+                                <input 
+                                  type="text"
+                                  placeholder="Optional note..."
+                                  value={foNotes[order._id] || ''}
+                                  onChange={e => setFoNotes({
+                                    ...foNotes,
+                                    [order._id]: e.target.value
+                                  })}
+                                  style={{ 
+                                    background: 'var(--bg-main)', 
+                                    border: '1px solid var(--border-main)', 
+                                    color: 'var(--text-main)', 
+                                    padding: '6px 10px', 
+                                    fontSize: '0.78rem', 
+                                    outline: 'none',
+                                    width: '100%',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
+                              </td>
+                              <td className="text-right">
+                                <button 
+                                  className="action-btn-mini"
+                                  onClick={() => handleAcknowledgeAdvance(order._id, foNotes[order._id])}
+                                  disabled={isSubmitting}
+                                  style={{ color: '#10b981', borderColor: '#10b981', marginLeft: 'auto' }}
+                                >
+                                  APPROVE ADVANCE
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {foSubTab === 'final_payments' && (
+                  <div className="table-wrapper scroll-inside">
+                    <table className="sharp-table">
+                      <thead>
+                        <tr>
+                          <th>FO CODE</th>
+                          <th>LOCATION</th>
+                          <th>EVENT DATE</th>
+                          <th>PAYMENT MODE</th>
+                          <th>FINAL PAYMENT AMOUNT</th>
+                          <th>ACKNOWLEDGMENT NOTE</th>
+                          <th style={{ textAlign: 'right' }}>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pendingFinalPayments.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="empty-state">No pending final payments to reconcile.</td>
+                          </tr>
+                        ) : (
+                          pendingFinalPayments.map((order) => (
+                            <tr key={order._id}>
+                              <td><strong>{order.foCode}</strong></td>
+                              <td>{order.centerId?.name?.toUpperCase() || 'UNKNOWN'}</td>
+                              <td>{new Date(order.eventDate).toLocaleDateString()}</td>
+                              <td>
+                                <span className={`category-tag`}>
+                                  {order.finalPaymentMode || 'N/A'}
+                                </span>
+                              </td>
+                              <td className="font-numeric">₹ {(order.finalPaymentAmount || 0).toFixed(2)}</td>
+                              <td>
+                                <input 
+                                  type="text"
+                                  placeholder="Optional note..."
+                                  value={foNotes[order._id] || ''}
+                                  onChange={e => setFoNotes({
+                                    ...foNotes,
+                                    [order._id]: e.target.value
+                                  })}
+                                  style={{ 
+                                    background: 'var(--bg-main)', 
+                                    border: '1px solid var(--border-main)', 
+                                    color: 'var(--text-main)', 
+                                    padding: '6px 10px', 
+                                    fontSize: '0.78rem', 
+                                    outline: 'none',
+                                    width: '100%',
+                                    boxSizing: 'border-box'
+                                  }}
+                                />
+                              </td>
+                              <td className="text-right">
+                                <button 
+                                  className="action-btn-mini"
+                                  onClick={() => handleAcknowledgeFinalPayment(order._id, foNotes[order._id])}
+                                  disabled={isSubmitting}
+                                  style={{ color: '#10b981', borderColor: '#10b981', marginLeft: 'auto' }}
+                                >
+                                  APPROVE PAYMENT
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           </div>

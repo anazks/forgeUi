@@ -14,6 +14,7 @@ const ProductionPage: React.FC = () => {
   const [filterLocation, setFilterLocation] = useState<string>('ALL');
   const [boms, setBoms] = useState<any[]>([]);
   const [selectedProduceItem, setSelectedProduceItem] = useState<any | null>(null);
+  const [filterDate, setFilterDate] = useState<string>('');
   
   const { search } = useLocation();
   const queryParams = new URLSearchParams(search);
@@ -170,19 +171,43 @@ const ProductionPage: React.FC = () => {
       </div>
 
       <div className="data-panel">
-        {isAdmin && (
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', gap: '16px', alignItems: 'center' }}>
-            <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
-            <select 
-              value={filterLocation}
-              onChange={(e) => setFilterLocation(e.target.value)}
-              style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px 12px', color: 'var(--text-main)', outline: 'none' }}
-            >
-              <option value="ALL">ALL LOCATIONS</option>
-              {locations.map(loc => (
-                <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
-              ))}
-            </select>
+        {(isAdmin || (activeTab === 'SEND')) && (
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-main)', display: 'flex', flexWrap: 'wrap', gap: '24px', alignItems: 'center' }}>
+            {isAdmin && (
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY LOCATION:</label>
+                <select 
+                  value={filterLocation}
+                  onChange={(e) => setFilterLocation(e.target.value)}
+                  style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '6px 12px', color: 'var(--text-main)', outline: 'none' }}
+                >
+                  <option value="ALL">ALL LOCATIONS</option>
+                  {locations.map(loc => (
+                    <option key={loc._id} value={loc._id}>{loc.name.toUpperCase()}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            
+            {activeTab === 'SEND' && (
+              <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-dim)' }}>FILTER BY DATE:</label>
+                <input 
+                  type="date"
+                  value={filterDate}
+                  onChange={(e) => setFilterDate(e.target.value)}
+                  style={{ background: 'var(--bg-main)', border: '1px solid var(--border-main)', padding: '5px 12px', color: 'var(--text-main)', outline: 'none', fontSize: '0.8rem' }}
+                />
+                {filterDate && (
+                  <button 
+                    onClick={() => setFilterDate('')}
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-strong)', padding: '5px 12px', color: 'var(--text-dim)', fontSize: '0.65rem', fontWeight: 900, cursor: 'pointer', transition: '0.2s' }}
+                  >
+                    CLEAR
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -285,12 +310,37 @@ const ProductionPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {orders.length === 0 ? (
-                  <tr><td colSpan={6} className="text-center py-12 text-dim">No orders found.</td></tr>
-                ) : (
-                  orders.map((order, idx) => (
+                {(() => {
+                  const filteredOrders = orders.filter((order) => {
+                    if (!filterDate) return true;
+                    const orderDateStr = new Date(order.dispatchedAt || order.createdAt).toISOString().split('T')[0];
+                    return orderDateStr === filterDate;
+                  });
+
+                  if (filteredOrders.length === 0) {
+                    return <tr><td colSpan={6} className="text-center py-12 text-dim">No orders found for the selected filters.</td></tr>;
+                  }
+
+                  return filteredOrders.map((order, idx) => (
                     <tr key={idx}>
-                      <td><strong>{order.orderCode}</strong></td>
+                      <td>
+                        <strong>{order.orderCode}</strong>
+                        {order.foodRequestId?.functionOrderId && (
+                          <span 
+                            style={{ 
+                              marginLeft: '8px', 
+                              fontSize: '0.55rem', 
+                              padding: '2px 6px', 
+                              background: 'rgba(168, 85, 247, 0.15)', 
+                              color: '#c084fc', 
+                              border: '1px solid rgba(168, 85, 247, 0.3)', 
+                              fontWeight: 900 
+                            }}
+                          >
+                            FUNCTION ORDER
+                          </span>
+                        )}
+                      </td>
                       <td>
                         {order.destinationLocation?.name?.toUpperCase() || 'UNKNOWN'}
                       </td>
@@ -315,85 +365,196 @@ const ProductionPage: React.FC = () => {
                         </button>
                       </td>
                     </tr>
-                  ))
-                )}
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
         )}
       </div>
 
-      {showDispatchModal && selectedOrder && (
-        <div className="modal-overlay">
-          <div className="modal-content workflow-modal" style={{ maxWidth: '600px' }}>
-            <div className="modal-header">
-              <h2>{isViewOnly ? 'VIEW ORDER' : 'DISPATCH ORDER'}: {selectedOrder.orderCode}</h2>
-              <button className="btn-close" onClick={() => setShowDispatchModal(false)}>✕</button>
-            </div>
-            <div className="modal-body">
-              {!isViewOnly && (
-                <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
-                  WARNING: DISPATCHING ITEMS WILL DEDUCT RAW MATERIALS FROM INVENTORY.
-                </p>
-              )}
-              <table className="mini-table">
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'center', width: '50px' }}>SELECT</th>
-                    <th>ITEM NAME</th>
-                    <th>PENDING QTY</th>
-                    <th>DISPATCH QTY</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedOrder.items.map((i: any, idx: number) => {
-                    const pendingQty = i.requestedQty - i.dispatchedQty;
-                    if (pendingQty <= 0) return null;
-                    return (
-                      <tr key={idx}>
-                        <td style={{ textAlign: 'center' }}>
-                          <input 
-                            type="checkbox"
-                            checked={selectedForDispatch[i._id] || false}
-                            onChange={(e) => setSelectedForDispatch({...selectedForDispatch, [i._id]: e.target.checked})}
-                            disabled={isViewOnly}
-                            style={{ transform: 'scale(1.2)', cursor: isViewOnly ? 'not-allowed' : 'pointer' }}
-                          />
-                        </td>
-                        <td><strong>{i.itemName}</strong></td>
-                        <td>{pendingQty} {i.unit}</td>
-                        <td>
-                          <input 
-                            type="number"
-                            value={dispatchForm[i._id] ?? pendingQty}
-                            onChange={(e) => setDispatchForm({...dispatchForm, [i._id]: Number(e.target.value)})}
-                            max={pendingQty}
-                            min="0"
-                            disabled={!selectedForDispatch[i._id] || isViewOnly}
-                            style={{ width: '80px', padding: '6px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', outline: 'none', opacity: (selectedForDispatch[i._id] && !isViewOnly) ? 1 : 0.5 }}
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="modal-footer">
-              {isViewOnly ? (
-                <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CLOSE</button>
-              ) : (
-                <>
-                  <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CANCEL</button>
-                  <button className="btn-action-sm payment" onClick={handleDispatch} disabled={isProcessing || Object.keys(selectedForDispatch).filter(k => selectedForDispatch[k]).length === 0}>
-                    {isProcessing ? 'PROCESSING...' : 'SET DISPATCH'}
-                  </button>
-                </>
-              )}
+      {showDispatchModal && selectedOrder && (() => {
+        const dispatchableItems = selectedOrder.items.filter((i: any) => (i.requestedQty - i.dispatchedQty) > 0);
+        const allSelected = dispatchableItems.length > 0 && dispatchableItems.every((i: any) => selectedForDispatch[i._id]);
+        const isOrderFullyDispatched = selectedOrder.items.every((i: any) => i.dispatchedQty >= i.requestedQty);
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content workflow-modal" style={{ maxWidth: '750px', width: '100%' }}>
+              <div className="modal-header">
+                <h2>{isViewOnly || isOrderFullyDispatched ? 'VIEW ORDER' : 'DISPATCH ORDER'}: {selectedOrder.orderCode}</h2>
+                <button className="btn-close" onClick={() => setShowDispatchModal(false)}>✕</button>
+              </div>
+              <div className="modal-body">
+                
+                <div className="premium-dispatch-header-card" style={{ marginBottom: '20px', padding: '18px', border: '1px solid var(--border-strong)', position: 'relative', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                        <span style={{ fontSize: '0.6rem', fontWeight: 800, background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
+                          INTERNAL TRANSFER
+                        </span>
+                        {selectedOrder.foodRequestId?.functionOrderId && (
+                          <span style={{ fontSize: '0.6rem', fontWeight: 900, background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
+                            FUNCTION ORDER
+                          </span>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
+                        DESTINATION LOCATION
+                      </span>
+                      <strong style={{ fontSize: '1.25rem', color: 'var(--text-main)', fontFamily: "'Outfit', sans-serif" }}>
+                        {selectedOrder.destinationLocation?.name?.toUpperCase() || 'UNKNOWN'}
+                      </strong>
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>PO REFERENCE</span>
+                        <strong className="code-badge" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(249, 115, 22, 0.08)', color: 'var(--primary)', border: '1px solid rgba(249, 115, 22, 0.25)', fontSize: '0.75rem', fontWeight: 900 }}>
+                          {selectedOrder.orderCode}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <table className="mini-table">
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'center', width: '60px' }}>
+                        {!isViewOnly && !isOrderFullyDispatched ? (
+                          <label className="premium-checkbox-container" style={{ margin: '0 auto' }}>
+                            <input 
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                const updated = { ...selectedForDispatch };
+                                dispatchableItems.forEach((i: any) => {
+                                  updated[i._id] = checked;
+                                });
+                                setSelectedForDispatch(updated);
+                              }}
+                            />
+                            <span className="premium-checkmark"></span>
+                          </label>
+                        ) : (
+                          'SELECT'
+                        )}
+                      </th>
+                      <th>ITEM NAME</th>
+                      <th>REQUESTED QTY</th>
+                      <th>DISPATCHED QTY</th>
+                      <th>PENDING QTY</th>
+                      <th>DISPATCH NOW</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedOrder.items.map((i: any, idx: number) => {
+                      const pendingQty = i.requestedQty - i.dispatchedQty;
+                      const isCompleted = pendingQty <= 0;
+                      
+                      const isSelected = selectedForDispatch[i._id] || false;
+                      const enteredQty = isCompleted ? 0 : (dispatchForm[i._id] ?? pendingQty);
+                      const hasQtyReduced = !isCompleted && enteredQty < pendingQty;
+                      
+                      let rowBg = 'transparent';
+                      let rowBorderLeft = 'none';
+                      if (isSelected && !isCompleted) {
+                        rowBg = 'rgba(99, 102, 241, 0.03)';
+                        rowBorderLeft = '3px solid var(--secondary)';
+                      }
+
+                      return (
+                        <tr key={idx} style={{ background: rowBg, borderLeft: rowBorderLeft, opacity: isCompleted ? 0.6 : 1 }}>
+                          <td style={{ textAlign: 'center' }}>
+                            <label className="premium-checkbox-container">
+                              <input 
+                                type="checkbox"
+                                checked={!isCompleted && isSelected}
+                                onChange={(e) => setSelectedForDispatch({...selectedForDispatch, [i._id]: e.target.checked})}
+                                disabled={isCompleted || isViewOnly}
+                              />
+                              <span className="premium-checkmark" style={{ opacity: isCompleted ? 0.5 : 1 }}></span>
+                            </label>
+                          </td>
+                          <td>
+                            <strong>{i.itemName.toUpperCase()}</strong>
+                            {isCompleted ? (
+                              <span style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 800, marginLeft: '8px', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', border: '1px solid rgba(16, 185, 129, 0.2)', display: 'inline-block', verticalAlign: 'middle' }}>
+                                ✓ FULLY DISPATCHED
+                              </span>
+                            ) : (
+                              isSelected && hasQtyReduced && (
+                                <div style={{ fontSize: '0.6rem', color: '#eab308', fontWeight: 800, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  ⚠️ PARTIAL DISPATCH (SHORTFALL: {(pendingQty - enteredQty).toFixed(2)})
+                                </div>
+                              )
+                            )}
+                          </td>
+                          <td><strong>{i.requestedQty} {i.unit?.toUpperCase()}</strong></td>
+                          <td><strong>{i.dispatchedQty} {i.unit?.toUpperCase()}</strong></td>
+                          <td><strong>{pendingQty} {i.unit?.toUpperCase()}</strong></td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input 
+                                type="number"
+                                value={enteredQty}
+                                onChange={(e) => setDispatchForm({...dispatchForm, [i._id]: Number(e.target.value)})}
+                                max={pendingQty}
+                                min="0"
+                                disabled={isCompleted || !selectedForDispatch[i._id] || isViewOnly}
+                                style={{ 
+                                  width: '80px', 
+                                  padding: '6px', 
+                                  background: 'var(--bg-main)', 
+                                  border: (isSelected && hasQtyReduced) ? '1px solid #eab308' : '1px solid var(--border-main)', 
+                                  color: (isSelected && hasQtyReduced) ? '#eab308' : 'var(--text-main)', 
+                                  outline: 'none',
+                                  fontWeight: 900,
+                                  opacity: (!isCompleted && selectedForDispatch[i._id] && !isViewOnly) ? 1 : 0.5 
+                                }}
+                              />
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 800 }}>{i.unit?.toUpperCase()}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="modal-footer">
+                {isViewOnly || isOrderFullyDispatched ? (
+                  <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CLOSE</button>
+                ) : (
+                  <>
+                    <button className="btn-cancel" onClick={() => setShowDispatchModal(false)}>CANCEL</button>
+                    <button 
+                      className="btn-premium-dispatch" 
+                      onClick={handleDispatch} 
+                      disabled={isProcessing || Object.keys(selectedForDispatch).filter(k => selectedForDispatch[k]).length === 0}
+                    >
+                      {isProcessing ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
+                          <span className="spinner-loader"></span>
+                          PROCESSING...
+                        </span>
+                      ) : (
+                        <>
+                          <Package size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
+                          CONFIRM DISPATCH
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
     {selectedProduceItem && (() => {
       const matchingBom = boms.find((b: any) => 
@@ -503,6 +664,92 @@ const ProductionPage: React.FC = () => {
         .mini-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-bottom: 24px; }
         .mini-table th { text-align: left; font-size: 0.65rem; font-weight: 900; color: var(--text-dim); border-bottom: 1px solid var(--border-main); padding: 8px; }
         .mini-table td { padding: 12px 8px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+        /* Premium Dispatch Button & checkmarks */
+        .btn-premium-dispatch {
+          background: #8b5cf6;
+          color: white;
+          border: none;
+          padding: 10px 24px;
+          font-size: 0.75rem;
+          font-weight: 700;
+          cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-premium-dispatch:hover:not(:disabled) {
+          background: #7c3aed;
+          transform: scale(1.03);
+          box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        }
+        .btn-premium-dispatch:active:not(:disabled) {
+          transform: scale(0.98);
+        }
+        .btn-premium-dispatch:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .spinner-loader {
+          width: 12px;
+          height: 12px;
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-radius: 50%;
+          border-top-color: white;
+          animation: spin 0.6s linear infinite;
+        }
+
+        /* Custom styled checkbox overlay */
+        .premium-checkbox-container {
+          display: inline-block;
+          position: relative;
+          width: 20px;
+          height: 20px;
+          cursor: pointer;
+          user-select: none;
+        }
+        .premium-checkbox-container input {
+          position: absolute;
+          opacity: 0;
+          cursor: pointer;
+          height: 0;
+          width: 0;
+        }
+        .premium-checkmark {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 20px;
+          width: 20px;
+          background-color: var(--bg-input);
+          border: 1px solid var(--border-strong);
+          transition: all 0.2s;
+        }
+        .premium-checkbox-container:hover input ~ .premium-checkmark {
+          border-color: var(--primary);
+        }
+        .premium-checkbox-container input:checked ~ .premium-checkmark {
+          background-color: var(--primary);
+          border-color: var(--primary);
+        }
+        .premium-checkmark:after {
+          content: "";
+          position: absolute;
+          display: none;
+        }
+        .premium-checkbox-container input:checked ~ .premium-checkmark:after {
+          display: block;
+        }
+        .premium-checkbox-container .premium-checkmark:after {
+          left: 6px;
+          top: 2px;
+          width: 5px;
+          height: 10px;
+          border: solid white;
+          border-width: 0 2px 2px 0;
+          transform: rotate(45deg);
+        }
       `}</style>
     </MainLayout>
   );

@@ -21,7 +21,6 @@ const ItemConfigPage: React.FC = () => {
 
   const [formData, setFormData] = useState({
     name: '',
-    vendorName: '',
     category: '',
     unit: 'kg',
     customUnit: '',
@@ -36,7 +35,6 @@ const ItemConfigPage: React.FC = () => {
       materials.filter(m =>
         m.name.toLowerCase().includes(term) ||
         m.simpleCode.includes(term) ||
-        (m.vendorName || '').toLowerCase().includes(term) ||
         (m.category || '').toLowerCase().includes(term)
       )
     );
@@ -57,7 +55,7 @@ const ItemConfigPage: React.FC = () => {
 
   const openCreateModal = () => {
     setEditingId(null);
-    setFormData({ name: '', vendorName: '', category: '', unit: 'kg', customUnit: '', minimumStock: '' });
+    setFormData({ name: '', category: '', unit: 'kg', customUnit: '', minimumStock: '' });
     setError('');
     setIsModalOpen(true);
   };
@@ -66,7 +64,6 @@ const ItemConfigPage: React.FC = () => {
     setEditingId(m._id);
     setFormData({
       name: m.name,
-      vendorName: m.vendorName || '',
       category: m.category || '',
       unit: m.unit,
       customUnit: m.customUnit || '',
@@ -98,7 +95,6 @@ const ItemConfigPage: React.FC = () => {
       setError('');
       const payload = {
         name: formData.name,
-        vendorName: formData.vendorName,
         category: formData.category,
         unit: formData.unit,
         minimumStock: Number(formData.minimumStock),
@@ -124,7 +120,6 @@ const ItemConfigPage: React.FC = () => {
 
   const getStockStatus = (stock: number) => {
     if (stock === 0) return 'zero';
-    if (stock < 10) return 'low';
     return 'normal';
   };
 
@@ -151,13 +146,6 @@ const ItemConfigPage: React.FC = () => {
             <h3>{materials.length}</h3>
           </div>
         </div>
-        <div className="sum-card warn">
-          <div className="sum-icon warn"><Package size={20} /></div>
-          <div className="sum-info">
-            <label>LOW THRESHOLD</label>
-            <h3>{materials.filter(m => m.minimumStock < 10 && m.minimumStock > 0).length}</h3>
-          </div>
-        </div>
         <div className="sum-card danger">
           <div className="sum-icon danger"><Package size={20} /></div>
           <div className="sum-info">
@@ -174,7 +162,7 @@ const ItemConfigPage: React.FC = () => {
             <Search size={14} />
             <input
               type="text"
-              placeholder="Search by name, code or vendor..."
+              placeholder="Search by name, code or category..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
@@ -189,7 +177,6 @@ const ItemConfigPage: React.FC = () => {
                   <th>CODE</th>
                   <th>MATERIAL NAME</th>
                   <th>CATEGORY</th>
-                  <th>VENDOR</th>
                   <th>UNIT</th>
                   <th>MIN. STOCK</th>
                   <th>STATUS</th>
@@ -215,9 +202,6 @@ const ItemConfigPage: React.FC = () => {
                         ? <span className="category-tag">{m.category}</span>
                         : <span className="no-vendor">—</span>}
                     </td>
-                    <td>
-                      <span className="vendor-name">{m.vendorName || <span className="no-vendor">—</span>}</span>
-                    </td>
                     <td><span className="unit-tag">{getUnitDisplay(m)}</span></td>
                     <td>
                       <span className={`stock-val ${getStockStatus(m.minimumStock)}`}>
@@ -227,8 +211,7 @@ const ItemConfigPage: React.FC = () => {
                     <td>
                       <div className={`stock-status ${getStockStatus(m.minimumStock)}`}>
                         <span className="dot"></span>
-                        {getStockStatus(m.minimumStock) === 'zero' ? 'NO THRESHOLD' :
-                          getStockStatus(m.minimumStock) === 'low' ? 'LOW THRESHOLD' : 'CONFIGURED'}
+                        {getStockStatus(m.minimumStock) === 'zero' ? 'NO THRESHOLD' : 'CONFIGURED'}
                       </div>
                     </td>
                     <td>
@@ -308,17 +291,6 @@ const ItemConfigPage: React.FC = () => {
                 </select>
               </div>
 
-              {/* Vendor Name */}
-              <div className="form-group">
-                <label>VENDOR NAME <span className="label-hint">(optional)</span></label>
-                <input
-                  type="text"
-                  name="vendorName"
-                  value={formData.vendorName}
-                  onChange={handleInputChange}
-                  placeholder="e.g. Fresh Farms Supplies"
-                />
-              </div>
 
               <div className="form-row">
                 {/* Unit */}
@@ -376,7 +348,7 @@ const ItemConfigPage: React.FC = () => {
         .header-title h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.5px; }
         .subtitle { font-size: 0.7rem; color: var(--text-dim); font-weight: 800; letter-spacing: 1px; text-transform: uppercase; margin-top: 4px; }
 
-        .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 32px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 32px; }
         .sum-card { background: var(--bg-sidebar); border: 1px solid var(--border-main); padding: 20px 24px; display: flex; align-items: center; gap: 16px; }
         .sum-icon { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: rgba(249,115,22,0.05); border: 1px solid rgba(249,115,22,0.15); color: var(--primary); }
         .sum-icon.warn { background: rgba(234,179,8,0.05); border-color: rgba(234,179,8,0.2); color: #eab308; }

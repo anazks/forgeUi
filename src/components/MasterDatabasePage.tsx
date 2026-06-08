@@ -9,7 +9,7 @@ import {
   Calendar, Layers, Search, Plus, Filter,
   Phone, Briefcase, 
   X, Check, Mail, CreditCard, ShieldCheck,
-  UserPlus, Building, Bell, Tag, Trash2, Loader2
+  UserPlus, Building, Bell, Tag, Trash2, Loader2, Edit2
 } from 'lucide-react';
 
 type MasterTab = 'vendors' | 'employees' | 'banks' | 'calendar' | 'expenses';
@@ -47,6 +47,8 @@ const MasterDatabasePage: React.FC = () => {
   const [locationOptions, setLocationOptions] = useState<any[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [editingBankId, setEditingBankId] = useState<string | null>(null);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<any>({
     // Vendor fields
@@ -55,15 +57,15 @@ const MasterDatabasePage: React.FC = () => {
     contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
     bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
     // Employee fields
-    employeeCode: '', employeeName: '', designation: '',
+    employeeCode: '', customEmployeeCode: '', employeeName: '', designation: '',
     dateOfJoining: '', locationType: 'Head Office', locationName: '',
     status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
     // Bank fields
-    bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '',
+    bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '', bankUserLocation: '',
     // Event fields
     eventName: '', eventDate: '', description: '', type: 'Others',
     // Expense Category fields
-    categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
+    categoryCode_exp: '', categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
   });
 
   useEffect(() => {
@@ -72,7 +74,10 @@ const MasterDatabasePage: React.FC = () => {
       fetchEmployees();
       fetchLocations();
     }
-    if (activeTab === 'banks') fetchBanks();
+    if (activeTab === 'banks') {
+      fetchBanks();
+      fetchLocations();
+    }
     if (activeTab === 'calendar') fetchEvents();
     if (activeTab === 'expenses') fetchExpenseCats();
   }, [activeTab, entityId]);
@@ -155,6 +160,66 @@ const MasterDatabasePage: React.FC = () => {
     }));
   };
 
+  const handleOpenAddModal = () => {
+    setEditingBankId(null);
+    setEditingExpenseId(null);
+    setFormData({
+      vendorCode: '', vendorName: '', address: '', gstNumber: '',
+      vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
+      contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
+      bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
+      employeeCode: '', customEmployeeCode: '', employeeName: '', designation: '',
+      dateOfJoining: '', locationType: 'Head Office', locationName: '',
+      status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
+      bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '', bankUserLocation: '',
+      eventName: '', eventDate: '', description: '', type: 'Others',
+      categoryCode_exp: '', categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
+    });
+    setShowModal(true);
+  };
+
+  const handleEditBank = (b: any) => {
+    setEditingBankId(b._id);
+    setFormData({
+      vendorCode: '', vendorName: '', address: '', gstNumber: '',
+      vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
+      contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
+      bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
+      employeeCode: '', customEmployeeCode: '', employeeName: '', designation: '',
+      dateOfJoining: '', locationType: 'Head Office', locationName: '',
+      status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
+      bankName_bank: b.bankName || '',
+      ifscCode_bank: b.ifscCode || '',
+      branch_bank: b.branch || '',
+      accountNumber_bank: b.accountNumber || '',
+      bankUserLocation: b.locations && b.locations.length > 0 ? (b.locations[0]._id || b.locations[0]) : '',
+      eventName: '', eventDate: '', description: '', type: 'Others',
+      categoryCode_exp: '', categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
+    });
+    setShowModal(true);
+  };
+
+  const handleEditExpense = (ex: any) => {
+    setEditingExpenseId(ex._id);
+    setFormData({
+      vendorCode: '', vendorName: '', address: '', gstNumber: '',
+      vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
+      contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
+      bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
+      employeeCode: '', customEmployeeCode: '', employeeName: '', designation: '',
+      dateOfJoining: '', locationType: 'Head Office', locationName: '',
+      status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
+      bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '', bankUserLocation: '',
+      eventName: '', eventDate: '', description: '', type: 'Others',
+      categoryCode_exp: ex.categoryCode || '',
+      categoryName_exp: ex.categoryName || '',
+      applicableLocations: ex.applicableLocations || [],
+      status_exp: ex.status || 'Active',
+      expenseType_exp: ex.expenseType || 'Production'
+    });
+    setShowModal(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -166,12 +231,18 @@ const MasterDatabasePage: React.FC = () => {
         await employeeApi.create({ ...formData, status: formData.status_emp });
         fetchEmployees();
       } else if (activeTab === 'banks') {
-        await bankApi.create({
+        const payload = {
           bankName: formData.bankName_bank,
           ifscCode: formData.ifscCode_bank,
           branch: formData.branch_bank,
-          accountNumber: formData.accountNumber_bank
-        });
+          accountNumber: formData.accountNumber_bank,
+          locations: formData.bankUserLocation ? [formData.bankUserLocation] : []
+        };
+        if (editingBankId) {
+          await bankApi.update(editingBankId, payload);
+        } else {
+          await bankApi.create(payload);
+        }
         fetchBanks();
       } else if (activeTab === 'calendar') {
         await eventApi.create({
@@ -182,27 +253,34 @@ const MasterDatabasePage: React.FC = () => {
         });
         fetchEvents();
       } else if (activeTab === 'expenses') {
-        await expenseCategoryApi.create({
+        const payload = {
           categoryName: formData.categoryName_exp,
           applicableLocations: formData.applicableLocations,
           status: formData.status_exp,
           expenseType: formData.expenseType_exp
-        });
+        };
+        if (editingExpenseId) {
+          await expenseCategoryApi.update(editingExpenseId, payload);
+        } else {
+          await expenseCategoryApi.create(payload);
+        }
         fetchExpenseCats();
       }
       
       setShowModal(false);
+      setEditingBankId(null);
+      setEditingExpenseId(null);
       setFormData({
         vendorCode: '', vendorName: '', address: '', gstNumber: '',
         vendorCategories: [] as string[], contactPersonName: '', contactNumber: '',
         contactEmail: '', creditPeriodType: 'Days', creditDays: 0,
         bankName: '', accountNumber: '', ifscCode: '', status: 'Active',
-        employeeCode: '', employeeName: '', designation: '',
+        employeeCode: '', customEmployeeCode: '', employeeName: '', designation: '',
         dateOfJoining: '', locationType: 'Head Office', locationName: '',
         status_emp: 'Active', emergencyContact: '', monthlyTakeHomeSalary: 0,
-        bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '',
+        bankName_bank: '', ifscCode_bank: '', branch_bank: '', accountNumber_bank: '', bankUserLocation: '',
         eventName: '', eventDate: '', description: '', type: 'Others',
-        categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
+        categoryCode_exp: '', categoryName_exp: '', applicableLocations: [] as string[], status_exp: 'Active', expenseType_exp: 'Production'
       });
     } catch (err: any) {
       alert(err.response?.data?.error || 'Failed to save entry');
@@ -270,7 +348,7 @@ const MasterDatabasePage: React.FC = () => {
           <h1>{headerInfo.title}</h1>
           <p className="subtitle">{headerInfo.subtitle}</p>
         </div>
-        <button className="btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn-primary" onClick={handleOpenAddModal}>
           <Plus size={16} /> ADD NEW {activeTab === 'calendar' ? 'EVENT' : activeTab.slice(0, -1).toUpperCase()}
         </button>
       </header>
@@ -368,7 +446,14 @@ const MasterDatabasePage: React.FC = () => {
                       <tr><td colSpan={9} className="text-center py-8 text-dim">No employees found. Click Add New to register.</td></tr>
                     ) : employees.map(e => (
                       <tr key={e._id}>
-                        <td><span className="code-badge">{e.employeeCode}</span></td>
+                        <td>
+                          <span className="code-badge">{e.employeeCode}</span>
+                          {e.customEmployeeCode && (
+                            <span className="custom-code-sub" style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                              {e.customEmployeeCode}
+                            </span>
+                          )}
+                        </td>
                         <td className="text-left">
                           <div className="vendor-cell">
                             <strong>{e.employeeName.toUpperCase()}</strong>
@@ -404,6 +489,7 @@ const MasterDatabasePage: React.FC = () => {
                     <tr>
                       <th>BANK NAME</th>
                       <th>ACCOUNT NUMBER</th>
+                      <th>LINKED TO</th>
                       <th>BRANCH</th>
                       <th>IFSC CODE</th>
                       <th>DATE ADDED</th>
@@ -412,7 +498,7 @@ const MasterDatabasePage: React.FC = () => {
                   </thead>
                   <tbody>
                     {banks.length === 0 ? (
-                      <tr><td colSpan={6} className="text-center py-8 text-dim">No bank accounts registered.</td></tr>
+                      <tr><td colSpan={7} className="text-center py-8 text-dim">No bank accounts registered.</td></tr>
                     ) : banks.map(b => (
                       <tr key={b._id}>
                         <td className="text-left">
@@ -422,13 +508,30 @@ const MasterDatabasePage: React.FC = () => {
                           </div>
                         </td>
                         <td><code className="acc-code">{b.accountNumber}</code></td>
+                        <td>
+                          {b.locations && b.locations.length > 0 ? (
+                            <div className="location-cell" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <strong>{b.locations[0]?.name?.toUpperCase()}</strong>
+                              <span className="person-sub" style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>
+                                {b.locations[0]?.role?.replace('_', ' ')}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-dim">—</span>
+                          )}
+                        </td>
                         <td>{b.branch}</td>
                         <td><span className="ifsc-badge">{b.ifscCode}</span></td>
                         <td><span className="text-dim">{new Date(b.createdAt).toLocaleDateString()}</span></td>
                         <td>
-                          <button className="delete-action-btn" onClick={() => handleDelete(b._id, b.bankName)}>
-                            <Trash2 size={14} />
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                            <button className="edit-action-btn" onClick={() => handleEditBank(b)} title="Edit">
+                              <Edit2 size={14} />
+                            </button>
+                            <button className="delete-action-btn" onClick={() => handleDelete(b._id, b.bankName)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -503,9 +606,14 @@ const MasterDatabasePage: React.FC = () => {
                         </td>
                         <td><span className={`status-pill ${ex.status.toLowerCase()}`}>{ex.status}</span></td>
                         <td>
-                          <button className="delete-action-btn" onClick={() => handleDelete(ex._id, ex.categoryName)}>
-                            <Trash2 size={14} />
-                          </button>
+                          <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                            <button className="edit-action-btn" onClick={() => handleEditExpense(ex)} title="Edit">
+                              <Edit2 size={14} />
+                            </button>
+                            <button className="delete-action-btn" onClick={() => handleDelete(ex._id, ex.categoryName)}>
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -532,10 +640,6 @@ const MasterDatabasePage: React.FC = () => {
               <div className="form-section">
                 <h3><ShieldCheck size={14} /> CORE INFORMATION</h3>
                 <div className="form-grid">
-                  <div className="input-group">
-                    <label>VENDOR CODE</label>
-                    <input name="vendorCode" value={formData.vendorCode} onChange={handleInputChange} required placeholder="VND-001" />
-                  </div>
                   <div className="input-group">
                     <label>VENDOR NAME</label>
                     <input name="vendorName" value={formData.vendorName} onChange={handleInputChange} required placeholder="Acme Supplies Ltd" />
@@ -649,8 +753,8 @@ const MasterDatabasePage: React.FC = () => {
                 <h3><ShieldCheck size={14} /> EMPLOYEE IDENTITY</h3>
                 <div className="form-grid" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
                   <div className="input-group">
-                    <label>EMPLOYEE CODE</label>
-                    <input name="employeeCode" value={formData.employeeCode} onChange={handleInputChange} required placeholder="EMP-101" />
+                    <label>EMPLOYEE CODE <span className="label-hint">(Optional)</span></label>
+                    <input name="customEmployeeCode" value={formData.customEmployeeCode} onChange={handleInputChange} placeholder="e.g. EMP-101" />
                   </div>
                   <div className="input-group">
                     <label>EMPLOYEE NAME</label>
@@ -732,8 +836,8 @@ const MasterDatabasePage: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal-content vendor-modal" style={{ maxWidth: '500px' }}>
             <div className="modal-header">
-              <h2><Landmark size={18} /> ADD BANK ACCOUNT</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={20} /></button>
+              <h2><Landmark size={18} /> {editingBankId ? 'EDIT BANK ACCOUNT' : 'ADD BANK ACCOUNT'}</h2>
+              <button className="close-btn" onClick={() => { setShowModal(false); setEditingBankId(null); }}><X size={20} /></button>
             </div>
             
             <form onSubmit={handleSubmit} className="vendor-form">
@@ -749,6 +853,17 @@ const MasterDatabasePage: React.FC = () => {
                     <input name="accountNumber_bank" value={formData.accountNumber_bank} onChange={handleInputChange} required placeholder="32145566778" />
                   </div>
                   <div className="input-group">
+                    <label>LINKED TO USER / LOCATION</label>
+                    <select name="bankUserLocation" value={formData.bankUserLocation} onChange={handleInputChange}>
+                      <option value="">SELECT USER / LOCATION</option>
+                      {locationOptions.map((loc: any) => (
+                        <option key={loc._id} value={loc._id}>
+                          {loc.name.toUpperCase()} ({loc.role?.replace('_', ' ')})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="input-group">
                     <label>BRANCH NAME</label>
                     <input name="branch_bank" value={formData.branch_bank} onChange={handleInputChange} required placeholder="Cyber City Branch" />
                   </div>
@@ -760,10 +875,10 @@ const MasterDatabasePage: React.FC = () => {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
+                <button type="button" className="btn-cancel" onClick={() => { setShowModal(false); setEditingBankId(null); }}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                  SAVE BANK
+                  {editingBankId ? 'UPDATE BANK' : 'SAVE BANK'}
                 </button>
               </div>
             </form>
@@ -839,8 +954,8 @@ const MasterDatabasePage: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal-content vendor-modal" style={{ maxWidth: '600px' }}>
             <div className="modal-header">
-              <h2><Layers size={18} /> DEFINE EXPENSE CATEGORY</h2>
-              <button className="close-btn" onClick={() => setShowModal(false)}><X size={20} /></button>
+              <h2><Layers size={18} /> {editingExpenseId ? 'EDIT EXPENSE CATEGORY' : 'DEFINE EXPENSE CATEGORY'}</h2>
+              <button className="close-btn" onClick={() => { setShowModal(false); setEditingExpenseId(null); }}><X size={20} /></button>
             </div>
             
             <form onSubmit={handleSubmit} className="vendor-form">
@@ -849,7 +964,7 @@ const MasterDatabasePage: React.FC = () => {
                 <div className="form-grid">
                   <div className="input-group">
                     <label>CATEGORY CODE</label>
-                    <input value="AUTO-GENERATED" disabled style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--primary)', fontWeight: 800 }} />
+                    <input value={editingExpenseId ? formData.categoryCode_exp : "AUTO-GENERATED"} disabled style={{ background: 'rgba(0,0,0,0.3)', color: 'var(--primary)', fontWeight: 800 }} />
                   </div>
                   <div className="input-group">
                     <label>CATEGORY NAME</label>
@@ -904,10 +1019,10 @@ const MasterDatabasePage: React.FC = () => {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn-cancel" onClick={() => setShowModal(false)}>CANCEL</button>
+                <button type="button" className="btn-cancel" onClick={() => { setShowModal(false); setEditingExpenseId(null); }}>CANCEL</button>
                 <button type="submit" className="btn-save" disabled={isSaving}>
                   {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                  SAVE CATEGORY
+                  {editingExpenseId ? 'UPDATE CATEGORY' : 'SAVE CATEGORY'}
                 </button>
               </div>
             </form>
@@ -945,6 +1060,9 @@ const MasterDatabasePage: React.FC = () => {
 
         .delete-action-btn { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 6px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
         .delete-action-btn:hover { color: #ef4444; border-color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
+        .edit-action-btn { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 6px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; }
+        .edit-action-btn:hover { color: #3b82f6; border-color: #3b82f6; background: rgba(59, 130, 246, 0.1); }
 
         .type-pill { font-size: 0.6rem; font-weight: 900; padding: 2px 6px; border: 1px solid; letter-spacing: 0.5px; }
         .type-pill.production { color: #8b5cf6; border-color: #8b5cf644; background: #8b5cf611; }
