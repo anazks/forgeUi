@@ -11,6 +11,7 @@ import {
 const StoreDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [materials, setMaterials] = useState<any[]>([]);
+  const [allInventory, setAllInventory] = useState<any[]>([]); // per-location records for filter
   const [bills, setBills] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -24,12 +25,14 @@ const StoreDashboard: React.FC = () => {
     try {
       setIsLoading(true);
       setError('');
-      const [stockRes, billsRes] = await Promise.all([
+      const [stockRes, allInvRes, billsRes] = await Promise.all([
         inventoryApi.getStockSummary(),
+        inventoryApi.getAll(),                           // for location filter
         purchaseApi.getBills().catch(() => ({ data: { data: [] } }))
       ]);
       setMaterials(stockRes.data.data || []);
-      setBills(billsRes.data?.data || billsRes.data || []);
+      setAllInventory(allInvRes.data.data || []);
+      setBills(billsRes.data.data || []);               // Bug#11: consistent path
       setLastUpdated(new Date());
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load stock data');
@@ -55,10 +58,12 @@ const StoreDashboard: React.FC = () => {
   const pendingPoBills = bills.filter((b: any) => b.deliveryStatus === 'PENDING').length;
   const deliveredUnpaid = bills.filter((b: any) => b.deliveryStatus === 'DELIVERED' && b.paymentStatus !== 'PAID').length;
 
-  // Build unique location list from materials
+  // Build unique location list from per-location inventory records (locationId is populated with {_id, name})
   const locationOptions: string[] = ['ALL', ...Array.from(
     new Set(
-      materials.flatMap((m: any) => (m.locations || []).map((l: any) => l.locationName || l.name || '').filter(Boolean))
+      allInventory
+        .map((inv: any) => inv.locationId?.name || '')
+        .filter(Boolean)
     )
   ).sort()];
 
@@ -67,7 +72,11 @@ const StoreDashboard: React.FC = () => {
     .filter(m => getStockStatus(m) !== 'ok')
     .filter(m => {
       if (locationFilter === 'ALL') return true;
-      return (m.locations || []).some((l: any) => (l.locationName || l.name) === locationFilter);
+      // Find if any per-location record for this material matches the selected location
+      return allInventory.some((inv: any) =>
+        (inv.materialId?._id || inv.materialId)?.toString() === m._id?.toString() &&
+        inv.locationId?.name === locationFilter
+      );
     });
 
   return (

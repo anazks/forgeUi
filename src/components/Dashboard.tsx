@@ -289,22 +289,34 @@ const Dashboard: React.FC = () => {
         });
         setLocalTomorrowRequest(tomorrowRequest || null);
 
-        // Fetch week revenue trend
-        const weekStart = getISTDate();
-        weekStart.setDate(weekStart.getDate() - 6);
-        const weekStartStr = getLocalDateString(weekStart);
-        try {
-          const weekRes = await revenueApi.getDaily('', undefined, weekStartStr, todayStr);
-          setLocalWeekRevenues(weekRes.data?.data?.records || []);
-        } catch (_) {
-          setLocalWeekRevenues([]);
+        // Fetch revenue trend (30 days — max selectable period)
+        if (['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role)) {
+          const trendStart = getISTDate();
+          trendStart.setDate(trendStart.getDate() - 29);
+          const trendStartStr = getLocalDateString(trendStart);
+          try {
+            const weekRes = await revenueApi.getDaily('', undefined, trendStartStr, todayStr);
+            const rawData = weekRes.data?.data;
+            setLocalWeekRevenues(
+              rawData?.records ?? (Array.isArray(rawData) ? rawData : [])
+            );
+          } catch (_) {
+            setLocalWeekRevenues([]);
+          }
         }
 
         if (user.role === 'HR') {
-          const hrDash = await employeeApi.getHrDashboard(entityId);
-          setHrDashboardMetrics(hrDash.data.data);
-          const empRes = await employeeApi.getAll(entityId);
-          setEmployees(empRes.data.data || []);
+          try {
+            const [hrDash, empRes] = await Promise.all([
+              employeeApi.getHrDashboard(entityId),
+              employeeApi.getAll(entityId)
+            ]);
+            setHrDashboardMetrics(hrDash.data.data);
+            setEmployees(empRes.data.data || []);
+          } catch (hrErr) {
+            console.error('HR dashboard metrics fetch failed:', hrErr);
+            // Don't propagate — dashboard data already loaded successfully
+          }
         }
       }
     } catch (err: any) {
@@ -828,13 +840,14 @@ const Dashboard: React.FC = () => {
       }
 
       if (user.role === 'HR') {
-        const currentMonthAcked = hrDashboardMetrics?.closedMonthsCount > 0;
+        // Fire payroll review reminder in the last 10 days of the month (payroll finalization window)
+        const todayDay = new Date().getDate();
         const hasAdvances = (hrDashboardMetrics?.totalAdvancesActive || 0) > 0;
-        if (!currentMonthAcked) {
+        if (todayDay >= 20 && employees.length > 0) {
           alerts.push({
             id: 'hr_month_pending',
-            text: `📅 Current month's payroll records have not been acknowledged yet.`,
-            severity: 'warning'
+            text: `📅 It's payroll period — review and acknowledge ${new Date().toLocaleString('en-IN', { month: 'long' })} records for ${employees.length} active employee(s).`,
+            severity: 'info'
           });
         }
         if (hasAdvances) {
@@ -889,7 +902,9 @@ const Dashboard: React.FC = () => {
     }
 
     return alerts;
-  }, [user, foodRequests, internalOrders, tomorrowStr, localTodayRevenue, todayStr, filteredDailyRevenues, inventory, rawMaterials, bills, upcomingEvents, functionOrders]);
+  }, [user, foodRequests, internalOrders, tomorrowStr, localTodayRevenue, todayStr,
+      filteredDailyRevenues, inventory, rawMaterials, bills, upcomingEvents, functionOrders,
+      hrDashboardMetrics, employees]);
 
   // ── 5-min auto-refresh for individual logins only ──
   useEffect(() => {
@@ -1590,9 +1605,16 @@ const Dashboard: React.FC = () => {
           {/* ── CENTER / RESTAURANT / AGGREGATE ── */}
           {['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role) && (() => {
             const myId = user.id || user._id;
-            // Week revenue: sum cooApproved records for this location
+            // Week sales: filter to last 7 days for the KPI card label accuracy
+            const sevenDaysAgo = getISTDate();
+            sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+            sevenDaysAgo.setHours(0, 0, 0, 0);
             const weekSales = localWeekRevenues
-              .filter((r: any) => (r.locationId?._id || r.locationId) === myId && r.cooApproved)
+              .filter((r: any) =>
+                (r.locationId?._id || r.locationId) === myId &&
+                r.cooApproved &&
+                new Date(r.date) >= sevenDaysAgo
+              )
               .reduce((sum: number, r: any) => {
                 const b2c = (r.b2cSales || []).reduce((a: number, s: any) => a + (s.totalVal || 0), 0);
                 const online = r.onlineSales?.totalSaleValue || 0;
