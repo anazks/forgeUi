@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
-import { inventoryApi } from '../services/api';
+import { inventoryApi, purchaseApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
 import {
   Package, AlertTriangle, CheckCircle, XCircle,
-  RefreshCw, Bell, ShoppingBag, BarChart2
+  RefreshCw, ShoppingBag, BarChart2, Filter
 } from 'lucide-react';
 
 const StoreDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [materials, setMaterials] = useState<any[]>([]);
+  const [bills, setBills] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [locationFilter, setLocationFilter] = useState<string>('ALL');
 
   const userStr = localStorage.getItem('user');
   const user = userStr ? JSON.parse(userStr) : null;
@@ -22,8 +24,12 @@ const StoreDashboard: React.FC = () => {
     try {
       setIsLoading(true);
       setError('');
-      const res = await inventoryApi.getStockSummary();
-      setMaterials(res.data.data || []);
+      const [stockRes, billsRes] = await Promise.all([
+        inventoryApi.getStockSummary(),
+        purchaseApi.getBills().catch(() => ({ data: { data: [] } }))
+      ]);
+      setMaterials(stockRes.data.data || []);
+      setBills(billsRes.data?.data || billsRes.data || []);
       setLastUpdated(new Date());
     } catch (err: any) {
       setError(err.response?.data?.error || 'Failed to load stock data');
@@ -46,8 +52,23 @@ const StoreDashboard: React.FC = () => {
   const criticalCount = materials.filter(m => m.currentStock === 0).length;
   const lowCount = materials.filter(m => m.currentStock > 0 && m.currentStock < m.minimumStock).length;
   const okCount = materials.filter(m => m.currentStock >= m.minimumStock && m.minimumStock > 0).length;
+  const pendingPoBills = bills.filter((b: any) => b.deliveryStatus === 'PENDING').length;
+  const deliveredUnpaid = bills.filter((b: any) => b.deliveryStatus === 'DELIVERED' && b.paymentStatus !== 'PAID').length;
 
-  const alerts = materials.filter(m => getStockStatus(m) !== 'ok');
+  // Build unique location list from materials
+  const locationOptions: string[] = ['ALL', ...Array.from(
+    new Set(
+      materials.flatMap((m: any) => (m.locations || []).map((l: any) => l.locationName || l.name || '').filter(Boolean))
+    )
+  ).sort()];
+
+  // Show only low/critical items, filtered by location
+  const filteredMaterials = materials
+    .filter(m => getStockStatus(m) !== 'ok')
+    .filter(m => {
+      if (locationFilter === 'ALL') return true;
+      return (m.locations || []).some((l: any) => (l.locationName || l.name) === locationFilter);
+    });
 
   return (
     <MainLayout>
@@ -59,7 +80,7 @@ const StoreDashboard: React.FC = () => {
             <h1>STOCK DASHBOARD</h1>
             <p className="store-sub">
               Welcome back, <strong>{user?.name?.toUpperCase()}</strong> · STORE MANAGER
-              <span className="store-sub-note"> — Stock totals are summed across all locations in real-time</span>
+              <span className="store-sub-note"> — Showing items requiring attention (low/critical stock)</span>
             </p>
           </div>
         </div>
@@ -78,33 +99,6 @@ const StoreDashboard: React.FC = () => {
       )}
 
       {error && <div className="error-message">{error}</div>}
-
-      {/* Alert Panel */}
-      {alerts.length > 0 && (
-        <div className="alert-panel">
-          <div className="alert-panel-header">
-            <Bell size={14} />
-            <span>STOCK ALERTS ({alerts.length})</span>
-          </div>
-          <div className="alert-list">
-            {alerts.map((m, i) => {
-              const status = getStockStatus(m);
-              const unit = getUnitLabel(m);
-              return (
-                <div key={i} className={`alert-item ${status === 'critical' ? 'alert-critical' : 'alert-low'}`}>
-                  {status === 'critical' ? <XCircle size={14} /> : <AlertTriangle size={14} />}
-                  <span>
-                    {status === 'critical'
-                      ? `${m.name} is OUT OF STOCK across all locations`
-                      : `${m.name} is below minimum (${m.minimumStock} ${unit}) — total: ${m.currentStock} ${unit}`}
-                  </span>
-                  <span className="alert-badge">{status.toUpperCase()}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Summary Cards */}
       <div className="stock-cards">
@@ -136,19 +130,56 @@ const StoreDashboard: React.FC = () => {
             <span className="sc-label">OUT OF STOCK</span>
           </div>
         </div>
+        <div className="stock-card po">
+          <div className="sc-icon po"><ShoppingBag size={22} /></div>
+          <div className="sc-info">
+            <span className="sc-val po">{pendingPoBills}</span>
+            <span className="sc-label">PENDING PO DELIVERIES</span>
+          </div>
+        </div>
+        <div className="stock-card unpaid">
+          <div className="sc-icon unpaid"><AlertTriangle size={22} /></div>
+          <div className="sc-info">
+            <span className="sc-val unpaid">{deliveredUnpaid}</span>
+            <span className="sc-label">DELIVERED, UNPAID BILLS</span>
+          </div>
+        </div>
       </div>
 
-      {/* Stock Table */}
+      {/* Stock Table — low/critical only + location filter */}
       <div className="data-panel">
         <div className="panel-header">
           <div>
-            <h2>{materials.length} STOCK ITEMS</h2>
-            <p className="panel-sub">Aggregated across all locations · <BarChart2 size={11} style={{display:'inline', verticalAlign:'middle'}} /> Real-time data</p>
+            <h2>{filteredMaterials.length} ITEMS NEEDING ATTENTION</h2>
+            <p className="panel-sub">Low and critical stock only · <BarChart2 size={11} style={{display:'inline', verticalAlign:'middle'}} /> Real-time data</p>
           </div>
-          <div className="panel-legend">
-            <span className="leg ok"><span className="leg-dot"></span>OK</span>
-            <span className="leg low"><span className="leg-dot"></span>LOW</span>
-            <span className="leg crit"><span className="leg-dot"></span>CRITICAL</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="panel-legend">
+              <span className="leg low"><span className="leg-dot"></span>LOW</span>
+              <span className="leg crit"><span className="leg-dot"></span>CRITICAL</span>
+            </div>
+            {/* Location filter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Filter size={12} style={{ color: 'var(--text-dim)' }} />
+              <select
+                value={locationFilter}
+                onChange={e => setLocationFilter(e.target.value)}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border-main)',
+                  color: 'var(--text-main)',
+                  padding: '4px 10px',
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  outline: 'none'
+                }}
+              >
+                {locationOptions.map(loc => (
+                  <option key={loc} value={loc}>{loc}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -162,11 +193,10 @@ const StoreDashboard: React.FC = () => {
                   <th>ITEM NAME</th>
                   <th>MIN. STOCK</th>
                   <th>TOTAL STOCK (ALL LOCATIONS)</th>
-                  <th>LOCATIONS</th>
                 </tr>
               </thead>
               <tbody>
-                {materials.map(m => {
+                {filteredMaterials.map(m => {
                   const status = getStockStatus(m);
                   const unit = getUnitLabel(m);
 
@@ -176,7 +206,7 @@ const StoreDashboard: React.FC = () => {
                         <div className={`status-dot-wrap ${status}`}>
                           <span className="pulse-dot"></span>
                           <span className="status-txt">
-                            {status === 'ok' ? 'IN STOCK' : status === 'low' ? 'LOW' : 'CRITICAL'}
+                            {status === 'low' ? 'LOW' : 'CRITICAL'}
                           </span>
                         </div>
                       </td>
@@ -197,16 +227,17 @@ const StoreDashboard: React.FC = () => {
                           {m.currentStock?.toFixed?.(2) ?? m.currentStock} {unit}
                         </span>
                       </td>
-                      <td>
-                        <span className="loc-count">{m.locationCount} loc{m.locationCount !== 1 ? 's' : ''}</span>
-                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-            {materials.length === 0 && (
-              <div className="empty-state">No inventory records found. Stock is updated automatically when deliveries are received.</div>
+            {filteredMaterials.length === 0 && (
+              <div className="empty-state">
+                {locationFilter === 'ALL'
+                  ? '✅ All stock levels are within minimum thresholds.'
+                  : `No low/critical items for location: ${locationFilter}`}
+              </div>
             )}
           </div>
         )}
@@ -224,31 +255,25 @@ const StoreDashboard: React.FC = () => {
         .btn-refresh { background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); padding: 8px 16px; font-size: 0.72rem; font-weight: 800; cursor: pointer; display: flex; align-items: center; gap: 8px; transition: 0.2s; }
         .btn-refresh:hover { border-color: var(--primary); color: var(--primary); }
 
-        /* Alert Panel */
-        .alert-panel { background: rgba(239,68,68,0.03); border: 1px solid rgba(239,68,68,0.2); margin-bottom: 24px; }
-        .alert-panel-header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid rgba(239,68,68,0.1); font-size: 0.7rem; font-weight: 800; color: #ef4444; letter-spacing: 1px; }
-        .alert-list { display: flex; flex-direction: column; }
-        .alert-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 0.8rem; border-bottom: 1px solid rgba(239,68,68,0.08); }
-        .alert-item:last-child { border-bottom: none; }
-        .alert-critical { color: #ef4444; }
-        .alert-low { color: #eab308; }
-        .alert-item svg { flex-shrink: 0; }
-        .alert-item span:nth-child(2) { flex: 1; }
-        .alert-badge { font-size: 0.6rem; font-weight: 800; padding: 2px 6px; border: 1px solid currentColor; background: rgba(255,255,255,0.03); }
-
         /* Summary Cards */
-        .stock-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-        .stock-card { background: var(--bg-sidebar); border: 1px solid var(--border-main); padding: 20px; display: flex; align-items: center; gap: 16px; transition: 0.2s; }
+        .stock-cards { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; margin-bottom: 28px; }
+        @media(max-width: 1100px) { .stock-cards { grid-template-columns: repeat(3, 1fr); } }
+        @media(max-width: 700px) { .stock-cards { grid-template-columns: repeat(2, 1fr); } }
+        .stock-card { background: var(--bg-card); border: 1px solid var(--border-main); padding: 20px; display: flex; align-items: center; gap: 16px; transition: 0.2s; }
         .stock-card:hover { border-color: var(--primary); }
         .sc-icon { color: var(--text-dim); }
         .sc-icon.ok { color: #10b981; }
         .sc-icon.low { color: #eab308; }
         .sc-icon.crit { color: #ef4444; }
+        .sc-icon.po { color: #3b82f6; }
+        .sc-icon.unpaid { color: #f97316; }
         .sc-info { display: flex; flex-direction: column; }
         .sc-val { font-size: 2rem; font-weight: 800; line-height: 1; }
         .sc-val.ok { color: #10b981; }
         .sc-val.low { color: #eab308; }
         .sc-val.crit { color: #ef4444; }
+        .sc-val.po { color: #3b82f6; }
+        .sc-val.unpaid { color: #f97316; }
         .sc-label { font-size: 0.6rem; font-weight: 800; color: var(--text-dim); letter-spacing: 0.5px; margin-top: 4px; }
 
         /* Panel */
@@ -275,6 +300,7 @@ const StoreDashboard: React.FC = () => {
         .status-dot-wrap.critical { color: #ef4444; }
         .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
         .status-dot-wrap.critical .pulse-dot { animation: pulse 1.5s infinite; }
+        .status-dot-wrap.low .pulse-dot { animation: pulse 3s infinite; }
         @keyframes pulse { 0%,100% { opacity:1; transform: scale(1); } 50% { opacity:0.4; transform: scale(1.3); } }
 
         .code-badge { font-family: monospace; font-size: 0.9rem; font-weight: 800; color: var(--primary); background: rgba(249,115,22,0.06); border: 1px solid rgba(249,115,22,0.15); padding: 3px 8px; letter-spacing: 2px; }
@@ -282,16 +308,12 @@ const StoreDashboard: React.FC = () => {
         .item-cell { display: flex; align-items: center; gap: 10px; justify-content: center; }
         .item-av { width: 28px; height: 28px; background: var(--border-main); display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 800; flex-shrink: 0; }
 
-        .vendor-cell { font-size: 0.8rem; color: var(--text-dim); }
-        .dim { opacity: 0.35; }
         .min-stock { font-size: 0.82rem; color: var(--text-dim); font-weight: 600; }
 
         .current-stock-val { font-weight: 800; font-size: 0.95rem; }
         .current-stock-val.ok { color: #10b981; }
         .current-stock-val.low { color: #eab308; }
         .current-stock-val.critical { color: #ef4444; }
-
-        .loc-count { font-size: 0.7rem; color: var(--text-dim); font-weight: 600; padding: 2px 8px; border: 1px solid var(--border-main); }
 
         .empty-state { padding: 60px; text-align: center; color: var(--text-dim); font-size: 0.85rem; }
       `}</style>

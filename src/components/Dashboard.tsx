@@ -93,6 +93,8 @@ const Dashboard: React.FC = () => {
   const [localTodayRevenue, setLocalTodayRevenue] = useState<any>(null);
   const [localYesterdayRevenue, setLocalYesterdayRevenue] = useState<any>(null);
   const [localTomorrowRequest, setLocalTomorrowRequest] = useState<any>(null);
+  const [localWeekRevenues, setLocalWeekRevenues] = useState<any[]>([]);
+  const [trendPeriod, setTrendPeriod] = useState<number>(7); // days for revenue trend
 
   const getISTDate = (d: Date = new Date()) => {
     const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
@@ -286,6 +288,17 @@ const Dashboard: React.FC = () => {
           return dStr === tomorrowStr;
         });
         setLocalTomorrowRequest(tomorrowRequest || null);
+
+        // Fetch week revenue trend
+        const weekStart = getISTDate();
+        weekStart.setDate(weekStart.getDate() - 6);
+        const weekStartStr = getLocalDateString(weekStart);
+        try {
+          const weekRes = await revenueApi.getDaily('', undefined, weekStartStr, todayStr);
+          setLocalWeekRevenues(weekRes.data?.data?.records || []);
+        } catch (_) {
+          setLocalWeekRevenues([]);
+        }
 
         if (user.role === 'HR') {
           const hrDash = await employeeApi.getHrDashboard(entityId);
@@ -815,12 +828,22 @@ const Dashboard: React.FC = () => {
       }
 
       if (user.role === 'HR') {
-        // Monthly record draft
-        alerts.push({
-          id: 'hr_payroll_console',
-          text: `📅 Payroll console is active. Review outstanding salary configurations in the console.`,
-          severity: 'info'
-        });
+        const currentMonthAcked = hrDashboardMetrics?.closedMonthsCount > 0;
+        const hasAdvances = (hrDashboardMetrics?.totalAdvancesActive || 0) > 0;
+        if (!currentMonthAcked) {
+          alerts.push({
+            id: 'hr_month_pending',
+            text: `📅 Current month's payroll records have not been acknowledged yet.`,
+            severity: 'warning'
+          });
+        }
+        if (hasAdvances) {
+          alerts.push({
+            id: 'hr_advances',
+            text: `💸 ₹${(hrDashboardMetrics.totalAdvancesActive).toLocaleString('en-IN')} in employee salary advances are active.`,
+            severity: 'info'
+          });
+        }
       }
     }
 
@@ -834,7 +857,20 @@ const Dashboard: React.FC = () => {
       });
     });
 
-    // Function Order Alerts (not requested for tomorrow)
+    // Self-production dispatch alert: internal orders dispatched from this user that haven't been received yet
+    if (['CENTERS', 'RESTAURANT', 'AGGREGATE', 'KITCHEN'].includes(user.role)) {
+      const selfId = user.id || user._id;
+      const pendingSelfDispatch = internalOrders.filter((o: any) =>
+        (o.sourceLocation?._id || o.sourceLocation) === selfId && o.status === 'DISPATCHED'
+      ).length;
+      if (pendingSelfDispatch > 0) {
+        alerts.push({
+          id: 'self_dispatch_pending',
+          text: `📬 ${pendingSelfDispatch} dispatched order(s) from your location are awaiting acceptance by the receiving center.`,
+          severity: 'info'
+        });
+      }
+    }
     if (isCorporate || ['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role)) {
       const myId = user.id || user._id;
       const pendingFoTomorrow = functionOrders.filter(fo => {
@@ -1292,18 +1328,18 @@ const Dashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Charts Row 2: Expense Pie + Daily Summary Table */}
-              <div className="chart-row-2" style={{ marginTop: 24 }}>
+              {/* Charts Row 2: Expense Breakdown (full width) */}
+              <div style={{ marginTop: 24 }}>
                 <div className="chart-card">
                   <div className="chart-hdr">
                     <h2>EXPENSE BREAKDOWN</h2>
                     <span className="chart-sub">Payroll · Stock · Operations</span>
                   </div>
-                  <div className="chart-body pie-center">
-                    {expensePieData.length === 0 ? (
-                      <div className="empty-chart">No expense records found</div>
-                    ) : (
-                      <div style={{ width: 240, height: 200 }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '24px', padding: '16px 20px', flexWrap: 'wrap' }}>
+                    <div style={{ width: 240, height: 200, flexShrink: 0 }}>
+                      {expensePieData.length === 0 ? (
+                        <div className="empty-chart">No expense records found</div>
+                      ) : (
                         <Pie
                           data={{
                             labels: expensePieData.map(d => d.name),
@@ -1318,46 +1354,18 @@ const Dashboard: React.FC = () => {
                             cutout: '55%'
                           }}
                         />
-                      </div>
-                    )}
-                  </div>
-                  <div className="expense-legend">
-                    {expensePieData.map(e => (
-                      <div key={e.name} className="exp-row">
-                        <span className="exp-dot" style={{ background: e.fill }} />
-                        <span className="exp-name">{e.name}</span>
-                        <span className="exp-val">{fmt(e.value)}</span>
-                        <span className="exp-pct">({businessStats.expensesTotal > 0 ? ((e.value / businessStats.expensesTotal) * 100).toFixed(1) : 0}%)</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="chart-card">
-                  <div className="chart-hdr">
-                    <h2>DAILY LOCATION SUMMARY</h2>
-                    <span className="chart-sub">{filteredDailyRevenues.length} records in range</span>
-                  </div>
-                  <div className="tbl-wrapper">
-                    <table className="dash-table">
-                      <thead><tr><th>DATE</th><th>LOCATION</th><th>STATUS</th><th style={{ textAlign: 'right' }}>SALES</th><th style={{ textAlign: 'right' }}>CASH</th></tr></thead>
-                      <tbody>
-                        {filteredDailyRevenues.slice(0, 10).map((rec: any, idx: number) => {
-                          const statusText = rec.financeReconciled ? 'RECONCILED' : rec.cooApproved ? 'COO APPROVED' : rec.status === 'CLOSED' ? 'PENDING COO' : rec.status;
-                          const statusCls = rec.financeReconciled ? 'bdg-green' : rec.cooApproved ? 'bdg-amber' : rec.status === 'CLOSED' ? 'bdg-blue' : 'bdg-grey';
-                          return (
-                            <tr key={rec._id || idx}>
-                              <td>{new Date(rec.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}</td>
-                              <td>{rec.locationId?.name?.toUpperCase()}</td>
-                              <td><span className={`bdg ${statusCls}`}>{statusText}</span></td>
-                              <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(rec.totalAmount || 0)}</td>
-                              <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(rec.cashClosure?.cashInHand || 0)}</td>
-                            </tr>
-                          );
-                        })}
-                        {filteredDailyRevenues.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', color: '#64748b' }}>No records match selected filters</td></tr>}
-                      </tbody>
-                    </table>
+                      )}
+                    </div>
+                    <div className="expense-legend" style={{ flex: 1, minWidth: '200px', borderTop: 'none', padding: 0, paddingTop: '16px' }}>
+                      {expensePieData.map(e => (
+                        <div key={e.name} className="exp-row">
+                          <span className="exp-dot" style={{ background: e.fill }} />
+                          <span className="exp-name">{e.name}</span>
+                          <span className="exp-val">{fmt(e.value)}</span>
+                          <span className="exp-pct">({businessStats.expensesTotal > 0 ? ((e.value / businessStats.expensesTotal) * 100).toFixed(1) : 0}%)</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1368,8 +1376,8 @@ const Dashboard: React.FC = () => {
           {activeTab === 'operations' && (
             <div className="tab-content">
               <div className="kpi-grid-3">
-                <KpiCard icon={<Activity size={18} />} label="PENDING FOOD REQUESTS" value={`${foodRequests.filter(fr => fr.status === 'PENDING').length}`} sub="Awaiting approval" />
-                <KpiCard icon={<Clock size={18} />} label="ACTIVE DISPATCHES IN TRANSIT" value={`${internalOrders.filter(o => ['DISPATCHED','PARTIAL_DISPATCH'].includes(o.status)).length}`} sub="Logistics in motion" />
+                <KpiCard icon={<Activity size={18} />} label="PENDING FOOD REQUESTS" value={`${foodRequests.filter(fr => fr.status === 'PENDING' && checkedLocations.includes(fr.centerId?._id || fr.centerId)).length}`} sub="Awaiting approval for selected locations" />
+                <KpiCard icon={<Clock size={18} />} label="ACTIVE DISPATCHES IN TRANSIT" value={`${internalOrders.filter(o => ['DISPATCHED','PARTIAL_DISPATCH'].includes(o.status) && (checkedLocations.includes(o.destinationLocation?._id || o.destinationLocation) || checkedLocations.includes(o.sourceLocation?._id || o.sourceLocation))).length}`} sub="Logistics in motion" />
                 <KpiCard icon={<TrendingUp size={18} />} label="OPERATIONAL EFFICIENCY" value={`${operationalStats.operationalEfficiency.toFixed(1)}%`} sub="Sold qty / Ordered qty" accent="#10b981" />
               </div>
 
@@ -1433,21 +1441,33 @@ const Dashboard: React.FC = () => {
                   <div className="chart-footer">Total Wastage Cost: <strong style={{ color: '#ef4444' }}>{fmt(operationalStats.totalWastageCost)}</strong></div>
                 </div>
 
-                {/* Dispatch Board */}
+                {/* Dispatch Board — filtered by selected locations and date range */}
                 <div className="chart-card">
-                  <div className="chart-hdr"><h2>ACTIVE DISPATCH BOARD</h2><span className="chart-sub">Logistics orders in motion</span></div>
+                  <div className="chart-hdr"><h2>ACTIVE DISPATCH BOARD</h2><span className="chart-sub">Logistics orders for selected locations · in date range</span></div>
                   <div className="tbl-wrapper">
                     <table className="dash-table">
-                      <thead><tr><th>ORDER CODE</th><th>DESTINATION</th><th>STATUS</th></tr></thead>
+                      <thead><tr><th>ORDER CODE</th><th>SOURCE</th><th>DESTINATION</th><th>STATUS</th></tr></thead>
                       <tbody>
-                        {internalOrders.slice(0, 10).map((o: any) => (
-                          <tr key={o._id}>
-                            <td><code className="u-code">{o.orderCode}</code></td>
-                            <td>{o.destinationLocation?.name?.toUpperCase()}</td>
-                            <td><span className={`bdg ${o.status === 'RECEIVED' ? 'bdg-green' : o.status === 'DISPATCHED' ? 'bdg-blue' : 'bdg-grey'}`}>{o.status}</span></td>
-                          </tr>
-                        ))}
-                        {internalOrders.length === 0 && <tr><td colSpan={3} style={{ textAlign: 'center', color: '#64748b' }}>No active orders</td></tr>}
+                        {(() => {
+                          const startRange = new Date(startDate); startRange.setHours(0,0,0,0);
+                          const endRange = new Date(endDate); endRange.setHours(23,59,59,999);
+                          const filtered = internalOrders.filter((o: any) => {
+                            const oDate = new Date(o.createdAt);
+                            const isInRange = oDate >= startRange && oDate <= endRange;
+                            const isLocMatched = checkedLocations.includes(o.destinationLocation?._id || o.destinationLocation) ||
+                                                 checkedLocations.includes(o.sourceLocation?._id || o.sourceLocation);
+                            return isInRange && isLocMatched;
+                          }).slice(0, 12);
+                          if (filtered.length === 0) return <tr><td colSpan={4} style={{ textAlign: 'center', color: '#64748b' }}>No active orders for selected locations / date range</td></tr>;
+                          return filtered.map((o: any) => (
+                            <tr key={o._id}>
+                              <td><code className="u-code">{o.orderCode}</code></td>
+                              <td>{o.sourceLocation?.name?.toUpperCase() || '—'}</td>
+                              <td>{o.destinationLocation?.name?.toUpperCase()}</td>
+                              <td><span className={`bdg ${o.status === 'RECEIVED' ? 'bdg-green' : o.status === 'DISPATCHED' ? 'bdg-blue' : 'bdg-grey'}`}>{o.status}</span></td>
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -1528,96 +1548,173 @@ const Dashboard: React.FC = () => {
          INDIVIDUAL ROLE DASHBOARD
       ═══════════════════════════════════════════════ */
         <div className="indiv-dash">
-
-          {/* ── 3-DAY WORKFLOW PIPELINE (all except HR) ── */}
-          {user.role !== 'HR' && (
-            <div className="wf-card">
-              <h2 className="wf-title">DAILY OPERATIONAL PIPELINE</h2>
-              <div className="wf-rows">
-                {[
-                  { label: `YESTERDAY  (${yesterdayStr})`, highlight: false, isToday: false, isYesterday: true },
-                  { label: `TODAY  (${todayStr})`, highlight: true, isToday: true, isYesterday: false },
-                  { label: `TOMORROW  (${tomorrowStr})`, highlight: false, isToday: false, isYesterday: false },
-                ].map(({ label, highlight, isToday, isYesterday }) => {
-                  const kitchStatus = isYesterday ? auditStatuses?.yesterdayKitchen : isToday ? auditStatuses?.todayKitchen : null;
-                  const centerStatus = isYesterday ? auditStatuses?.yesterdayCenter : isToday ? auditStatuses?.todayCenter : null;
-                  return (
-                    <div key={label} className="wf-row">
-                      <span className={`wf-day-label ${highlight ? 'highlight' : ''}`}>{label}</span>
-                      <div className="wf-steps">
-                        {user.role === 'KITCHEN' ? (
-                          <>
-                            <WorkflowBubble label="Orders Received" done={kitchStatus?.hasOrders || false} />
-                            <WorkflowLine done={kitchStatus?.allDispatched || false} />
-                            <WorkflowBubble label="All Dispatched" done={kitchStatus?.allDispatched || false} />
-                            {isToday && <WorkflowLine done={false} />}
-                            {isToday && <WorkflowBubble label="Report Submitted" done={false} />}
-                          </>
-                        ) : isToday || isYesterday ? (
-                          <>
-                            <WorkflowBubble label="Request Created" done={centerStatus?.hasRequest || false} />
-                            <WorkflowLine done={centerStatus?.isApproved || false} />
-                            <WorkflowBubble label="Approved" done={centerStatus?.isApproved || false} />
-                            <WorkflowLine done={centerStatus?.inProd || false} />
-                            <WorkflowBubble label="In Production" done={centerStatus?.inProd || false} />
-                            <WorkflowLine done={centerStatus?.received || false} />
-                            <WorkflowBubble label="Delivered" done={centerStatus?.received || false} />
-                            <WorkflowLine done={centerStatus?.closed || false} />
-                            <WorkflowBubble label="Accounts Closed" done={centerStatus?.closed || false} />
-                          </>
-                        ) : (
-                          <WorkflowBubble label="Food Request Planned" done={!!localTomorrowRequest} />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* ── TODAY WORKFLOW (CENTER / KITCHEN — single compact line) ── */}
+          {!['HR', 'STORE', 'FINANCE'].includes(user.role) && (() => {
+            const cs = auditStatuses?.todayCenter;
+            const ks = auditStatuses?.todayKitchen;
+            const isCenter = ['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role);
+            const steps = isCenter
+              ? [
+                  { label: 'Request Created', done: cs?.hasRequest || false },
+                  { label: 'Approved',        done: cs?.isApproved || false },
+                  { label: 'In Production',   done: cs?.inProd || false },
+                  { label: 'Delivered',       done: cs?.received || false },
+                  { label: 'Day Closed',      done: cs?.closed || false },
+                ]
+              : [
+                  { label: 'Orders Received', done: ks?.hasOrders || false },
+                  { label: 'In Production',   done: ks?.hasOrders || false },
+                  { label: 'All Dispatched',  done: ks?.allDispatched || false },
+                ];
+            const activeIdx = steps.map(s => s.done).lastIndexOf(true);
+            return (
+              <div className="wf-card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <h2 className="wf-title">TODAY'S OPERATIONAL STATUS — {todayStr}</h2>
+                  <span style={{ fontSize: '0.65rem', color: activeIdx === steps.length - 1 ? '#34d399' : '#f59e0b', fontWeight: 800 }}>
+                    {activeIdx === steps.length - 1 ? '✓ ALL DONE' : `STEP ${activeIdx + 2} OF ${steps.length}`}
+                  </span>
+                </div>
+                <div className="wf-steps">
+                  {steps.map((step, i) => (
+                    <React.Fragment key={step.label}>
+                      {i > 0 && <WorkflowLine done={steps[i - 1].done} />}
+                      <WorkflowBubble label={step.label} done={step.done} />
+                    </React.Fragment>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── CENTER / RESTAURANT / AGGREGATE ── */}
-          {['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role) && (
-            <div>
-              <div className="kpi-grid-3" style={{ marginTop: 24 }}>
-                <KpiCard icon={<DollarSign size={18} />} label="TODAY'S GROSS SALES" value={fmt(localTodayRevenue?.totalAmount || 0)} sub="Daily counter closures" />
-                <KpiCard icon={<AlertTriangle size={18} />} label="DAILY WASTAGE ESTIMATE" value={fmt(operationalStats.totalWastageCost)} sub="Stock minus Sold valuation" accent="#f59e0b" />
-                <KpiCard icon={<Clock size={18} />} label="PENDING INCOMING DELIVERIES" value={`${internalOrders.filter(o => (o.destinationLocation?._id || o.destinationLocation) === (user.id || user._id) && o.status === 'DISPATCHED').length}`} sub="Awaiting kitchen receipt" />
-              </div>
+          {['CENTERS', 'RESTAURANT', 'AGGREGATE'].includes(user.role) && (() => {
+            const myId = user.id || user._id;
+            // Week revenue: sum cooApproved records for this location
+            const weekSales = localWeekRevenues
+              .filter((r: any) => (r.locationId?._id || r.locationId) === myId && r.cooApproved)
+              .reduce((sum: number, r: any) => {
+                const b2c = (r.b2cSales || []).reduce((a: number, s: any) => a + (s.totalVal || 0), 0);
+                const online = r.onlineSales?.totalSaleValue || 0;
+                return sum + b2c + online;
+              }, 0);
+            const pendingDeliveries = internalOrders.filter((o: any) =>
+              (o.destinationLocation?._id || o.destinationLocation) === myId && o.status === 'DISPATCHED'
+            ).length;
+            return (
+              <div>
+                <div className="kpi-grid-3" style={{ marginTop: 24 }}>
+                  <KpiCard icon={<TrendingUp size={18} />} label="THIS WEEK'S SALES" value={fmt(weekSales)} sub="Last 7 days · COO approved records" accent="#10b981" />
+                  <KpiCard icon={<DollarSign size={18} />} label="YESTERDAY'S CLOSING SALES" value={fmt(localYesterdayRevenue?.totalAmount || 0)} sub={localYesterdayRevenue ? 'Final closed amount' : 'No record available'} />
+                  <KpiCard icon={<Clock size={18} />} label="PENDING INCOMING DELIVERIES" value={`${pendingDeliveries}`} sub="Awaiting kitchen receipt" accent={pendingDeliveries > 0 ? '#f59e0b' : undefined} />
+                </div>
 
-              <div className="dish-rank-grid" style={{ marginTop: 20 }}>
-                <div className="dish-rank-card border-green"><span className="dish-rank-lbl">🏆 TOP SOLD TODAY</span><span className="dish-rank-name">{operationalStats.topSold?.name || '—'}</span><span className="dish-rank-val text-green">{operationalStats.topSold ? `${operationalStats.topSold.qty} units` : 'No logs'}</span></div>
-                <div className="dish-rank-card border-red"><span className="dish-rank-lbl">📉 LEAST SOLD TODAY</span><span className="dish-rank-name">{operationalStats.leastSold?.name || '—'}</span><span className="dish-rank-val text-red">{operationalStats.leastSold ? `${operationalStats.leastSold.qty} units` : 'No logs'}</span></div>
-                <div className="dish-rank-card border-green"><span className="dish-rank-lbl">💰 TOP REVENUE DISH</span><span className="dish-rank-name">{operationalStats.topRevenue?.name || '—'}</span><span className="dish-rank-val text-green">{operationalStats.topRevenue ? fmt(operationalStats.topRevenue.value) : 'No logs'}</span></div>
-                <div className="dish-rank-card border-red"><span className="dish-rank-lbl">🔻 LEAST REVENUE DISH</span><span className="dish-rank-name">{operationalStats.leastRevenue?.name || '—'}</span><span className="dish-rank-val text-red">{operationalStats.leastRevenue ? fmt(operationalStats.leastRevenue.value) : 'No logs'}</span></div>
+                {/* Revenue Trend Chart */}
+                <div className="chart-card" style={{ marginTop: 20 }}>
+                  <div className="chart-hdr" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <h2>REVENUE TREND</h2>
+                      <span className="chart-sub">B2C + Online · COO approved records</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      {[7, 14, 30].map(d => (
+                        <button
+                          key={d}
+                          onClick={() => setTrendPeriod(d)}
+                          style={{
+                            background: trendPeriod === d ? 'var(--primary)' : 'transparent',
+                            border: '1px solid var(--border-main)',
+                            color: trendPeriod === d ? '#fff' : 'var(--text-dim)',
+                            padding: '3px 10px', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
+                          }}
+                        >
+                          {d}D
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="chart-body" style={{ height: 200 }}>
+                    {(() => {
+                      const cutoff = getISTDate();
+                      cutoff.setDate(cutoff.getDate() - (trendPeriod - 1));
+                      const filtered = localWeekRevenues
+                        .filter((r: any) => (r.locationId?._id || r.locationId) === myId && r.cooApproved && new Date(r.date) >= cutoff)
+                        .sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                      if (filtered.length === 0) return <div className="empty-chart">No approved revenue records in the last {trendPeriod} days</div>;
+                      return (
+                        <Bar
+                          data={{
+                            labels: filtered.map((r: any) => new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })),
+                            datasets: [
+                              { label: 'B2C', data: filtered.map((r: any) => (r.b2cSales || []).reduce((a: number, s: any) => a + (s.totalVal || 0), 0)), backgroundColor: '#f97316', stack: 'a' },
+                              { label: 'Online', data: filtered.map((r: any) => r.onlineSales?.totalSaleValue || 0), backgroundColor: '#a855f7', stack: 'a' },
+                            ]
+                          }}
+                          options={{
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: {
+                              legend: { labels: { color: '#94a3b8', font: { size: 10 } } },
+                              tooltip: { callbacks: { label: ctx => `₹${Number(ctx.raw).toLocaleString('en-IN')}` } }
+                            },
+                            scales: {
+                              x: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { color: 'rgba(128,128,128,0.1)' } },
+                              y: { stacked: true, ticks: { color: '#94a3b8', font: { size: 10 }, callback: (v: any) => `₹${(v/1000).toFixed(0)}k` }, grid: { color: 'rgba(128,128,128,0.1)' } }
+                            }
+                          }}
+                          height={200}
+                        />
+                      );
+                    })()}
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── KITCHEN MANAGER ── */}
-          {user.role === 'KITCHEN' && (
-            <div className="chart-card" style={{ marginTop: 24 }}>
-              <div className="chart-hdr"><h2>TODAY'S FOOD REQUEST QUEUE</h2><span className="chart-sub">Approved center requests requiring production</span></div>
-              <div className="tbl-wrapper">
-                <table className="dash-table">
-                  <thead><tr><th>CENTER</th><th>REQUEST ID</th><th>ITEMS</th><th>STATUS</th></tr></thead>
-                  <tbody>
-                    {foodRequests.filter(fr => ['PENDING','APPROVED'].includes(fr.status)).slice(0, 12).map((fr: any, idx: number) => (
-                      <tr key={idx}>
-                        <td>{fr.centerName?.toUpperCase() || 'UNKNOWN'}</td>
-                        <td><code className="u-code">#{fr._id?.slice(-6)}</code></td>
-                        <td>{fr.requestedItems?.length || 0} items</td>
-                        <td><span className={`bdg ${fr.status === 'APPROVED' ? 'bdg-green' : 'bdg-amber'}`}>{fr.status}</span></td>
-                      </tr>
-                    ))}
-                    {foodRequests.filter(fr => ['PENDING','APPROVED'].includes(fr.status)).length === 0 && (
-                      <tr><td colSpan={4} style={{ textAlign: 'center', color: '#64748b' }}>No active food requests</td></tr>
-                    )}
-                  </tbody>
-                </table>
+          {user.role === 'KITCHEN' && (() => {
+            const myId = user.id || user._id;
+            const todayOrders = internalOrders.filter((o: any) => {
+              const dStr = getLocalDateString(new Date(o.createdAt));
+              return dStr === todayStr && (o.sourceLocation?._id || o.sourceLocation) === myId;
+            });
+            const pendingToday = todayOrders.filter((o: any) => o.status === 'PENDING').length;
+            const dispatchedToday = todayOrders.filter((o: any) => ['DISPATCHED', 'RECEIVED'].includes(o.status)).length;
+            const todayFoodRequests = foodRequests.filter((fr: any) => {
+              const dStr = getLocalDateString(new Date(fr.deliveryDate));
+              return dStr === todayStr && ['PENDING', 'APPROVED'].includes(fr.status);
+            });
+            return (
+              <div>
+                <div className="kpi-grid-2" style={{ marginTop: 24 }}>
+                  <KpiCard icon={<Clock size={18} />} label="PENDING ORDERS TODAY" value={`${pendingToday}`} sub="Awaiting production / dispatch" accent={pendingToday > 0 ? '#f59e0b' : undefined} />
+                  <KpiCard icon={<Activity size={18} />} label="DISPATCHED TODAY" value={`${dispatchedToday}`} sub="Orders sent to centers" accent="#10b981" />
+                </div>
+                <div className="chart-card" style={{ marginTop: 20 }}>
+                  <div className="chart-hdr"><h2>TODAY'S FOOD REQUEST QUEUE</h2><span className="chart-sub">For today's delivery date · PENDING and APPROVED</span></div>
+                  <div className="tbl-wrapper">
+                    <table className="dash-table">
+                      <thead><tr><th>CENTER</th><th>REQUEST ID</th><th>ITEMS</th><th>STATUS</th></tr></thead>
+                      <tbody>
+                        {todayFoodRequests.length === 0 ? (
+                          <tr><td colSpan={4} style={{ textAlign: 'center', color: '#64748b' }}>No food requests for today</td></tr>
+                        ) : (
+                          todayFoodRequests.slice(0, 12).map((fr: any, idx: number) => (
+                            <tr key={idx}>
+                              <td>{fr.centerName?.toUpperCase() || 'UNKNOWN'}</td>
+                              <td><code className="u-code">#{fr._id?.slice(-6)}</code></td>
+                              <td>{fr.requestedItems?.length || 0} items</td>
+                              <td><span className={`bdg ${fr.status === 'APPROVED' ? 'bdg-green' : 'bdg-amber'}`}>{fr.status}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ── STORE MANAGER ── */}
           {user.role === 'STORE' && (
@@ -1647,62 +1744,27 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
-          {/* ── FINANCE MANAGER ── */}
-          {user.role === 'FINANCE' && (
-            <div className="chart-row-2" style={{ marginTop: 24 }}>
-              <div className="chart-card">
-                <div className="chart-hdr"><h2>RECONCILIATION QUEUE</h2><span className="chart-sub">COO-approved, pending bank reconciliation</span></div>
-                <div className="tbl-wrapper">
-                  <table className="dash-table">
-                    <thead><tr><th>LOCATION</th><th>DATE</th><th style={{ textAlign: 'right' }}>REPORTED SALES</th><th style={{ textAlign: 'right' }}>CASH IN HAND</th></tr></thead>
-                    <tbody>
-                      {filteredDailyRevenues.filter(r => r.cooApproved && !r.financeReconciled).map((rec: any, i: number) => (
-                        <tr key={i}>
-                          <td>{rec.locationId?.name?.toUpperCase()}</td>
-                          <td>{new Date(rec.date).toLocaleDateString('en-IN')}</td>
-                          <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(rec.totalAmount || 0)}</td>
-                          <td style={{ textAlign: 'right', fontFamily: 'monospace' }}>{fmt(rec.cashClosure?.cashInHand || 0)}</td>
-                        </tr>
-                      ))}
-                      {filteredDailyRevenues.filter(r => r.cooApproved && !r.financeReconciled).length === 0 && (
-                        <tr><td colSpan={4} style={{ textAlign: 'center', color: '#64748b' }}>No pending reconciliations</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="chart-card">
-                <div className="chart-hdr"><h2>UNPAID BILLS QUEUE</h2><span className="chart-sub">Outstanding vendor payments</span></div>
-                <div className="tbl-wrapper">
-                  <table className="dash-table">
-                    <thead><tr><th>BILL CODE</th><th>DESTINATION</th><th style={{ textAlign: 'right' }}>AMOUNT DUE</th></tr></thead>
-                    <tbody>
-                      {bills.filter(b => b.paymentStatus === 'UNPAID').slice(0, 10).map((b: any, i: number) => (
-                        <tr key={i}>
-                          <td><code className="u-code">{b.billCode}</code></td>
-                          <td>{b.destinationLocation?.name?.toUpperCase() || '—'}</td>
-                          <td style={{ textAlign: 'right', fontFamily: 'monospace', color: '#ef4444' }}>{fmt(b.totalAmount || 0)}</td>
-                        </tr>
-                      ))}
-                      {bills.filter(b => b.paymentStatus === 'UNPAID').length === 0 && <tr><td colSpan={3} style={{ textAlign: 'center', color: '#64748b' }}>No unpaid bills</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* ── HR MANAGER ── */}
           {user.role === 'HR' && (
             <div>
+              {/* Dynamic payroll workflow */}
               <div className="wf-card" style={{ marginBottom: 24 }}>
-                <h2 className="wf-title">PAYROLL MONTHLY WORKFLOW</h2>
+                <h2 className="wf-title">PAYROLL MONTHLY WORKFLOW — {new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' }).toUpperCase()}</h2>
                 <div className="wf-steps" style={{ marginTop: 16 }}>
-                  <WorkflowBubble label="Leaves Applied" done={true} />
-                  <WorkflowLine done={true} />
-                  <WorkflowBubble label="Advance Deductions" done={true} />
-                  <WorkflowLine done={!!(hrDashboardMetrics?.closedMonthsCount > 0)} />
-                  <WorkflowBubble label="Salary Acknowledged" done={!!(hrDashboardMetrics?.closedMonthsCount > 0)} />
+                  {(() => {
+                    const hasEmployees = employees.length > 0;
+                    const hasAdvanceConfig = (hrDashboardMetrics?.totalAdvancesActive || 0) >= 0 && hasEmployees;
+                    const hasAcknowledged = (hrDashboardMetrics?.closedMonthsCount || 0) > 0;
+                    return (
+                      <>
+                        <WorkflowBubble label="Employees Active" done={hasEmployees} />
+                        <WorkflowLine done={hasAdvanceConfig} />
+                        <WorkflowBubble label="Advance Config Set" done={hasAdvanceConfig} />
+                        <WorkflowLine done={hasAcknowledged} />
+                        <WorkflowBubble label="Salary Acknowledged" done={hasAcknowledged} />
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               <div className="kpi-grid-2">
@@ -1787,7 +1849,7 @@ const Dashboard: React.FC = () => {
         .notif-icon { flex-shrink:0; }
 
         /* ─── Header ─── */
-        .db-header { display:flex; justify-content:space-between; align-items:center; padding:20px 24px; margin-bottom:20px; background:#111827; border:1px solid #1e3a5f; border-radius:8px !important; }
+        .db-header { display:flex; justify-content:space-between; align-items:center; padding:20px 24px; margin-bottom:20px; background:var(--bg-card); border:1px solid var(--border-main); border-radius:8px !important; }
         .db-title { font-size:1.1rem; font-weight:900; letter-spacing:2px; color:#f1f5f9; }
         .db-subtitle { font-size:.72rem; color:#64748b; margin-top:3px; letter-spacing:.5px; }
         .db-error { padding:12px 20px; background:rgba(239,68,68,0.1); border-left:3px solid #ef4444; color:#fca5a5; font-size:.8rem; margin-bottom:16px; }
@@ -1839,7 +1901,7 @@ const Dashboard: React.FC = () => {
         .kpi-grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:24px; }
         .kpi-grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; }
         @media(max-width:900px){ .kpi-grid-4{grid-template-columns:repeat(2,1fr);} }
-        .kpi-card { display:flex; align-items:center; gap:16px; padding:18px 20px; background:#111827; border:1px solid #1e3a5f; border-radius:8px !important; transition:border-color .25s,transform .2s; }
+        .kpi-card { display:flex; align-items:center; gap:16px; padding:18px 20px; background:var(--bg-card); border:1px solid var(--border-main); border-radius:8px !important; transition:border-color .25s,transform .2s; }
         .kpi-card:hover { border-color:#f97316; transform:translateY(-2px); }
         .kpi-icon { width:42px; height:42px; border-radius:8px; background:rgba(249,115,22,0.08); border:1px solid rgba(249,115,22,0.15); display:flex; align-items:center; justify-content:center; color:#f97316; flex-shrink:0; }
         .kpi-body { display:flex; flex-direction:column; gap:2px; min-width:0; }
@@ -1850,8 +1912,8 @@ const Dashboard: React.FC = () => {
         /* ─── Chart Cards ─── */
         .chart-row-2 { display:grid; grid-template-columns:3fr 2fr; gap:20px; }
         @media(max-width:900px){ .chart-row-2{grid-template-columns:1fr;} }
-        .chart-card { background:#111827; border:1px solid #1e3a5f; border-radius:8px !important; overflow:hidden; }
-        .chart-hdr { padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.07); }
+        .chart-card { background:var(--bg-card); border:1px solid var(--border-main); border-radius:8px !important; overflow:hidden; }
+        .chart-hdr { padding:16px 20px; border-bottom:1px solid var(--border-main); }
         .chart-hdr h2 { font-size:.75rem; font-weight:800; letter-spacing:1px; color:#94a3b8; }
         .chart-sub { font-size:.65rem; color:#475569; margin-top:2px; display:block; }
         .chart-body { padding:16px 12px; overflow-x:auto; }
@@ -1871,7 +1933,7 @@ const Dashboard: React.FC = () => {
         /* ─── Dish Rankings ─── */
         .dish-rank-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
         @media(max-width:900px){ .dish-rank-grid{grid-template-columns:repeat(2,1fr);} }
-        .dish-rank-card { padding:16px 18px; background:#111827; border:1px solid #1e3a5f; border-radius:8px !important; display:flex; flex-direction:column; gap:6px; transition:border-color .2s; }
+        .dish-rank-card { padding:16px 18px; background:var(--bg-card); border:1px solid var(--border-main); border-radius:8px !important; display:flex; flex-direction:column; gap:6px; transition:border-color .2s; }
         .dish-rank-card:hover { border-color:rgba(249,115,22,0.4); }
         .border-green { border-left:3px solid #10b981 !important; }
         .border-red { border-left:3px solid #ef4444 !important; }
@@ -1898,7 +1960,7 @@ const Dashboard: React.FC = () => {
         .u-code { font-family:monospace; background:rgba(249,115,22,0.08); border:1px solid rgba(249,115,22,0.2); color:#f97316; padding:2px 6px; border-radius:3px; font-size:.8em; }
 
         /* ─── Workflow Pipeline ─── */
-        .wf-card { background:#111827; border:1px solid #1e3a5f; border-radius:8px !important; padding:20px 24px; }
+        .wf-card { background:var(--bg-card); border:1px solid var(--border-main); border-radius:8px !important; padding:20px 24px; }
         .wf-title { font-size:.75rem; font-weight:800; color:#64748b; letter-spacing:1px; margin-bottom:4px; }
         .wf-rows { display:flex; flex-direction:column; gap:16px; margin-top:16px; }
         .wf-row { display:flex; align-items:center; gap:20px; }
