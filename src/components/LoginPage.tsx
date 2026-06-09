@@ -24,6 +24,8 @@ const LoginPage: React.FC = () => {
       // Role-based routing
       if (user.role === 'STORE') {
         navigate('/store-dashboard');
+      } else if (user.role === 'FINANCE') {
+        navigate('/finance?tab=dashboard');
       } else {
         navigate('/dashboard');
       }

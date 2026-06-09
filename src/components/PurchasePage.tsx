@@ -3,6 +3,7 @@ import { useParams, useLocation } from 'react-router-dom';
 import MainLayout from '../layouts/MainLayout';
 import { purchaseApi, rawMaterialApi, vendorApi, userApi, menuApi, productionApi, expenseApi, expenseCategoryApi } from '../services/api';
 import ForgeLoader from './ForgeLoader';
+import BillViewModal from './BillViewModal';
 import { 
   ShoppingBag, Plus, Trash2, X, 
   DollarSign, Package, Truck,
@@ -729,259 +730,22 @@ const PurchasePage: React.FC = () => {
 
 
 
-      {/* Delivery Receipt Modal */}
-      {showReceiveModal && selectedBill && (() => {
-        const isCompleted = activeTab === 'INTERNAL' 
-          ? selectedBill.status === 'RECEIVED' 
-          : selectedBill.deliveryStatus === 'DELIVERED';
-          
-        const receivableItems = selectedBill.items.filter((i: any) => {
-          const pending = activeTab === 'INTERNAL' 
-            ? (i.dispatchedQty - i.receivedQty) 
-            : (i.quantity - (i.receivedQty || 0));
-          return pending > 0;
-        });
-        
-        const allSelected = receivableItems.length > 0 && receivableItems.every((i: any) => selectedForReceive[i._id]);
-        
-        const isOrderFullyReceived = selectedBill.items.every((i: any) => {
-          const pending = activeTab === 'INTERNAL' 
-            ? (i.dispatchedQty - i.receivedQty) 
-            : (i.quantity - (i.receivedQty || 0));
-          return pending <= 0;
-        });
-
-        return (
-          <div className="modal-overlay">
-            <div className="modal-content workflow-modal" style={{ maxWidth: '750px', width: '100%' }}>
-              <div className="modal-header">
-                <h2>{isCompleted || isViewOnly || isOrderFullyReceived ? 'VIEW DELIVERY' : 'ACCEPT DELIVERY'}</h2>
-                <button className="btn-close" onClick={() => setShowReceiveModal(false)}>✕</button>
-              </div>
-              <div className="modal-body">
-                <div className="premium-delivery-header-card" style={{ marginBottom: '20px', padding: '18px', background: 'rgba(30, 41, 59, 0.5)', border: '1px solid var(--border-strong)', position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                        {activeTab === 'INTERNAL' ? (
-                          <span style={{ fontSize: '0.6rem', fontWeight: 800, background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8', border: '1px solid rgba(99, 102, 241, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
-                            INTERNAL TRANSFER
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.6rem', fontWeight: 800, background: 'rgba(16, 185, 129, 0.15)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)', padding: '2px 6px', letterSpacing: '0.5px' }}>
-                            EXTERNAL VENDOR
-                          </span>
-                        )}
-                      </div>
-                      <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>
-                        {activeTab === 'INTERNAL' ? 'SOURCE LOCATION' : 'VENDOR NAME'}
-                      </span>
-                      <strong style={{ fontSize: '1.25rem', color: 'var(--text-main)', fontFamily: "'Outfit', sans-serif" }}>
-                        {activeTab === 'INTERNAL' 
-                          ? (selectedBill.sourceLocation?.name?.toUpperCase() || 'UNKNOWN') 
-                          : (selectedBill.vendor?.vendorName?.toUpperCase() || 'UNKNOWN')}
-                      </strong>
-                    </div>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                      {selectedBill.purchaseRequest?.prCode && (
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: '2px' }}>PR REFERENCE</span>
-                          <strong className="code-badge" style={{ display: 'inline-block', padding: '3px 8px', background: 'rgba(249, 115, 22, 0.08)', color: 'var(--primary)', border: '1px solid rgba(249, 115, 22, 0.25)', fontSize: '0.75rem', fontWeight: 900 }}>
-                            {selectedBill.purchaseRequest.prCode}
-                          </strong>
-                        </div>
-                      )}
-                      {selectedBill.createdAt && (
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>
-                            ORDERED ON {new Date(selectedBill.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <p style={{ fontSize: '0.65rem', fontWeight: 900, color: 'var(--text-dim)', marginBottom: '12px' }}>
-                  {activeTab === 'INTERNAL' 
-                    ? 'SELECT ITEMS AND QUANTITIES TO RECEIVE' 
-                    : 'VERIFY RECEIVED QUANTITIES (UPDATES INVENTORY)'}
-                </p>
-                
-                <table className="mini-table">
-                  <thead>
-                    <tr>
-                      {activeTab === 'INTERNAL' && (
-                        <th style={{ textAlign: 'center', width: '60px' }}>
-                          {!isViewOnly && !isCompleted && !isOrderFullyReceived ? (
-                            <label className="premium-checkbox-container" style={{ margin: '0 auto' }}>
-                              <input 
-                                type="checkbox"
-                                checked={allSelected}
-                                onChange={(e) => {
-                                  const checked = e.target.checked;
-                                  const updated = { ...selectedForReceive };
-                                  receivableItems.forEach((i: any) => {
-                                    updated[i._id] = checked;
-                                  });
-                                  setSelectedForReceive(updated);
-                                }}
-                              />
-                              <span className="premium-checkmark"></span>
-                            </label>
-                          ) : (
-                            'SELECT'
-                          )}
-                        </th>
-                      )}
-                      <th>ITEM NAME</th>
-                      <th>{activeTab === 'INTERNAL' ? 'DISPATCHED QTY' : 'ORDERED QTY'}</th>
-                      <th>RECEIVED QTY</th>
-                      <th>PENDING QTY</th>
-                      <th>RECEIVE NOW</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedBill.items.map((i: any, idx: number) => {
-                      const pendingQty = activeTab === 'INTERNAL' 
-                        ? (i.dispatchedQty - i.receivedQty) 
-                        : (i.quantity - (i.receivedQty || 0));
-                      const isCompletedItem = pendingQty <= 0;
-                      const idKey = activeTab === 'INTERNAL' ? i._id : i.item;
-                      
-                      const isSelected = activeTab === 'INTERNAL' ? (selectedForReceive[i._id] || false) : true;
-                      const enteredQty = isCompleted || isCompletedItem ? 0 : (receiveForm[idKey] ?? pendingQty);
-                      const hasMismatch = !isCompleted && !isCompletedItem && isSelected && (enteredQty !== pendingQty);
-                      const isPerfectMatch = !isCompleted && !isCompletedItem && isSelected && (enteredQty === pendingQty);
-                      
-                      let rowBg = 'transparent';
-                      let rowBorderLeft = 'none';
-                      if (isSelected && !isCompleted && !isCompletedItem) {
-                        if (hasMismatch) {
-                          rowBg = 'rgba(234, 179, 8, 0.04)';
-                          rowBorderLeft = '3px solid #eab308';
-                        } else if (isPerfectMatch && enteredQty > 0) {
-                          rowBg = 'rgba(16, 185, 129, 0.04)';
-                          rowBorderLeft = '3px solid #10b981';
-                        }
-                      }
-
-                      return (
-                        <tr key={idx} style={{ background: rowBg, borderLeft: rowBorderLeft, opacity: (isCompleted || isCompletedItem) ? 0.6 : 1 }}>
-                          {activeTab === 'INTERNAL' && (
-                            <td style={{ textAlign: 'center' }}>
-                              <label className="premium-checkbox-container">
-                                <input 
-                                  type="checkbox"
-                                  checked={!isCompletedItem && isSelected}
-                                  onChange={(e) => setSelectedForReceive({...selectedForReceive, [i._id]: e.target.checked})}
-                                  disabled={isCompleted || isCompletedItem || isViewOnly}
-                                />
-                                <span className="premium-checkmark" style={{ opacity: (isCompleted || isCompletedItem) ? 0.5 : 1 }}></span>
-                              </label>
-                            </td>
-                          )}
-                          <td>
-                            <strong>{i.itemName.toUpperCase()}</strong>
-                            {isCompleted || isCompletedItem ? (
-                              <span style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 800, marginLeft: '8px', background: 'rgba(16, 185, 129, 0.1)', padding: '2px 6px', border: '1px solid rgba(16, 185, 129, 0.2)', display: 'inline-block', verticalAlign: 'middle' }}>
-                                ✓ FULLY RECEIVED
-                              </span>
-                            ) : hasMismatch ? (
-                              <div style={{ fontSize: '0.6rem', color: '#eab308', fontWeight: 800, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                ⚠️ QUANTITY MISMATCH (DIFF: {(enteredQty - pendingQty).toFixed(2)})
-                              </div>
-                            ) : isSelected ? (
-                              <div style={{ fontSize: '0.6rem', color: '#10b981', fontWeight: 800, marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                ✓ QUANTITIES MATCH PERFECTLY
-                              </div>
-                            ) : null}
-                          </td>
-                          <td>
-                            <strong>
-                              {activeTab === 'INTERNAL' ? i.dispatchedQty : i.quantity} {i.unit?.toUpperCase() || 'PCS'}
-                            </strong>
-                          </td>
-                          <td>
-                            <strong>
-                              {i.receivedQty || 0} {i.unit?.toUpperCase() || 'PCS'}
-                            </strong>
-                          </td>
-                          <td>
-                            <strong>
-                              {pendingQty} {i.unit?.toUpperCase() || 'PCS'}
-                            </strong>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <input 
-                                type="number"
-                                value={isCompleted || isCompletedItem ? 0 : enteredQty}
-                                onChange={(e) => setReceiveForm({...receiveForm, [idKey]: Number(e.target.value)})}
-                                disabled={(activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || isCompleted || isCompletedItem || isViewOnly}
-                                max={pendingQty}
-                                min="0"
-                                style={{ 
-                                  width: '80px', 
-                                  padding: '6px', 
-                                  background: 'var(--bg-main)', 
-                                  border: hasMismatch ? '1px solid #eab308' : '1px solid var(--border-main)', 
-                                  color: hasMismatch ? '#eab308' : 'var(--text-main)', 
-                                  outline: 'none',
-                                  fontWeight: 900,
-                                  opacity: ((activeTab === 'INTERNAL' && !selectedForReceive[i._id]) || isCompleted || isCompletedItem || isViewOnly) ? 0.5 : 1
-                                }}
-                              />
-                              <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', fontWeight: 800 }}>{i.unit?.toUpperCase() || 'PCS'}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                {isCompleted || isViewOnly || isOrderFullyReceived ? (
-                  <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CLOSE</button>
-                ) : (
-                  <>
-                    <button className="btn-cancel" onClick={() => setShowReceiveModal(false)}>CANCEL</button>
-                    {activeTab === 'INTERNAL' && (
-                      <button 
-                        className="btn-action-sm" 
-                        disabled 
-                        style={{ background: '#ef4444', color: 'white', opacity: 0.5, cursor: 'not-allowed' }}
-                      >
-                        REJECT DELIVERY
-                      </button>
-                    )}
-                    <button 
-                      className="btn-premium-accept" 
-                      onClick={handleConfirmReceive} 
-                      disabled={isProcessing || (activeTab === 'INTERNAL' && Object.keys(selectedForReceive).filter(k => selectedForReceive[k]).length === 0)}
-                    >
-                      {isProcessing ? (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'center' }}>
-                          <span className="spinner-loader"></span>
-                          PROCESSING...
-                        </span>
-                      ) : (
-                        <>
-                          <Package size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-                          ACCEPT DELIVERY
-                        </>
-                      )}
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
+      {/* Delivery Receipt Modal — via shared BillViewModal */}
+      {showReceiveModal && selectedBill && (
+        <BillViewModal
+          bill={selectedBill}
+          isViewOnly={isViewOnly}
+          showMarkPaid={false}
+          isInternal={activeTab === 'INTERNAL'}
+          onClose={() => setShowReceiveModal(false)}
+          onAcceptDelivery={handleConfirmReceive}
+          receiveForm={receiveForm}
+          onReceiveFormChange={setReceiveForm}
+          selectedForReceive={selectedForReceive}
+          onSelectedForReceiveChange={setSelectedForReceive}
+          isProcessing={isProcessing}
+        />
+      )}
 
 
       {/* Add Expense Modal */}

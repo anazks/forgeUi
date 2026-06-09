@@ -160,13 +160,13 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
       return (
         <div className="sidebar-scrollable">
           <div className="sidebar-section">
-            <p className="section-title">Stock Payments</p>
+            <p className="section-title">Overview</p>
             <nav className="sidebar-nav">
               <button 
-                className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'stock_purchases' ? 'active' : ''}`} 
-                onClick={() => navigate('/finance?tab=stock_purchases')}
+                className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'dashboard' ? 'active' : ''}`} 
+                onClick={() => navigate('/finance?tab=dashboard')}
               >
-                <DollarSign size={18} /><span>Stock Purchases</span>
+                <LayoutDashboard size={18} /><span>Financial Dashboard</span>
               </button>
             </nav>
           </div>
@@ -188,6 +188,18 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children }) => {
                   No sale locations
                 </div>
               )}
+            </nav>
+          </div>
+
+          <div className="sidebar-section">
+            <p className="section-title">Master Data</p>
+            <nav className="sidebar-nav">
+              <button 
+                className={`nav-item ${location.pathname === '/finance' && activeTabQuery === 'banks' ? 'active' : ''}`} 
+                onClick={() => navigate('/finance?tab=banks')}
+              >
+                <Landmark size={18} /><span>Bank Master</span>
+              </button>
             </nav>
           </div>
 

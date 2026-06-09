@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
 import { 
   Landmark, 
@@ -12,23 +12,28 @@ import {
   Lock, 
   Unlock, 
   ShieldAlert,
-  Building2
+  Building2,
+  TrendingUp,
+  Package,
+  FileText
 } from 'lucide-react';
 import MainLayout from '../layouts/MainLayout';
 import ForgeLoader from './ForgeLoader';
+import BillViewModal from './BillViewModal';
 import { financeApi, userApi, bankApi, purchaseApi, functionOrderApi } from '../services/api';
 
-type TopTabType = 'dashboard' | 'location' | 'banks' | 'stock_purchases' | 'function_orders';
-type LogTabType = 'b2c' | 'b2b';
+type TopTabType = 'dashboard' | 'location' | 'banks' | 'function_orders';
+type LogTabType = 'b2c' | 'b2b' | 'stock_purchases';
 
 const FinancePage: React.FC = () => {
   const routerLocation = useLocation();
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<TopTabType>('location');
   const [logTab, setLogTab] = useState<LogTabType>('b2c');
-  const [foSubTab, setFoSubTab] = useState<'advances' | 'final_payments'>('advances');
+  const [foSubTab, setFoSubTab] = useState<'advances' | 'final_payments' | 'all_orders'>('advances');
   const [pendingAdvances, setPendingAdvances] = useState<any[]>([]);
   const [pendingFinalPayments, setPendingFinalPayments] = useState<any[]>([]);
+  const [allFunctionOrders, setAllFunctionOrders] = useState<any[]>([]);
   const [foNotes, setFoNotes] = useState<Record<string, string>>({});
   
   const [locations, setLocations] = useState<any[]>([]);
@@ -47,6 +52,7 @@ const FinancePage: React.FC = () => {
   // Local verification edits state indexed by date
   const [localVerification, setLocalVerification] = useState<Record<string, any>>({});
 
+  const [bankDetails, setBankDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -54,6 +60,10 @@ const FinancePage: React.FC = () => {
 
   // Stock Purchases bills list
   const [bills, setBills] = useState<any[]>([]);
+  // Stock purchases sub-tab filters
+  const [stockDateFilter, setStockDateFilter] = useState<string>('');
+  // Selected bill for view modal (Finance view)
+  const [selectedBillForView, setSelectedBillForView] = useState<any | null>(null);
 
   const fetchBills = async () => {
     try {
@@ -90,12 +100,21 @@ const FinancePage: React.FC = () => {
     try {
       setIsLoading(true);
       setError('');
-      const res = await functionOrderApi.getPendingFinance();
-      setPendingAdvances(res.data.data.pendingAdvances || []);
-      setPendingFinalPayments(res.data.data.pendingFinalPayments || []);
+      // Fetch ALL function orders so acknowledged ones remain visible
+      const res = await functionOrderApi.getAll();
+      const all: any[] = res.data.data || [];
+      setAllFunctionOrders(all);
+      // Advance pending = has advanceAmount but not yet finance-acknowledged
+      setPendingAdvances(
+        all.filter((o: any) => (o.advanceAmount > 0) && !o.advanceFinanceAcknowledged)
+      );
+      // Final payment pending = settled/closed but finance not yet acknowledged
+      setPendingFinalPayments(
+        all.filter((o: any) => ['SETTLED', 'CLOSED'].includes(o.status) && !o.finalFinanceAcknowledged)
+      );
     } catch (err) {
       console.error(err);
-      setError('Failed to fetch pending function orders for reconciliation');
+      setError('Failed to fetch function orders for reconciliation');
     } finally {
       setIsLoading(false);
     }
@@ -155,16 +174,23 @@ const FinancePage: React.FC = () => {
   useEffect(() => {
     if (activeTab === 'dashboard') {
       fetchDashboardStats();
+      fetchBills();
+      fetchPendingFunctionOrders();
     } else if (activeTab === 'location' && selectedLocationId) {
       fetchLocationLogs(selectedLocationId);
     } else if (activeTab === 'banks') {
       fetchBanks();
-    } else if (activeTab === 'stock_purchases') {
-      fetchBills();
     } else if (activeTab === 'function_orders') {
       fetchPendingFunctionOrders();
     }
   }, [activeTab, selectedLocationId]);
+
+  // Fetch bills when switching to stock_purchases sub-tab inside location view
+  useEffect(() => {
+    if (activeTab === 'location' && logTab === 'stock_purchases') {
+      fetchBills();
+    }
+  }, [logTab, activeTab]);
 
   const fetchInitialSetup = async () => {
     try {
@@ -212,9 +238,9 @@ const FinancePage: React.FC = () => {
       setError('');
       const entityId = currentUser?.role === 'SUPER_ADMIN' ? undefined : (currentUser?.entity?._id || currentUser?.entity);
       const res = await financeApi.getFinanceLocationDetails(locationId, entityId);
-      
-      const { records } = res.data.data;
+      const { records, bank } = res.data.data;
       setLocationLogs(records || []);
+      setBankDetails(bank || null);
       setExpandedDate(null); // Reset expanded accordion day
 
       // Prepopulate verification inputs
@@ -288,12 +314,6 @@ const FinancePage: React.FC = () => {
     }
   };
 
-  const calculateOnlineExpected = (record: any, role: string) => {
-    const totalVal = record.onlineSales?.totalSaleValue || 0;
-    const commPct = record.onlineSales?.aggregatorPercentage || 0;
-    return role === 'AGGREGATE' ? totalVal * (1 - commPct / 100) : totalVal;
-  };
-
   const getReconciliationMath = (record: any, verifInputs: any, role: string, isOnlineEnabled: boolean) => {
     if (role === 'AGGREGATE') {
       const reportedTotal = record.aggregatorTotalReceivable || 0;
@@ -306,16 +326,22 @@ const FinancePage: React.FC = () => {
       };
     }
 
-    const reportedCashVal = record.reportedCash || 0;
-    const reportedOnlineVal = record.reportedOnline || 0;
-    const onlineExpected = isOnlineEnabled ? calculateOnlineExpected(record, role) : 0;
-    const reportedTotal = reportedCashVal + reportedOnlineVal + onlineExpected;
+    const cashToBankExpected = record.cashClosure?.cashDepositedToBank || 0;
+    const b2cOnlineExpected = record.reportedOnline || 0;
+    const onlineSalesExpected = isOnlineEnabled ? (record.onlineSales?.totalSaleValue || 0) : 0;
+    
+    // For B2B/Restaurant locations, expect the B2B revenue
+    const isB2B = ['KITCHEN', 'RESTAURANT'].includes(role);
+    const b2bExpected = isB2B ? (record.b2bSales?.reduce((sum: number, item: any) => sum + (item.totalVal || 0), 0) || 0) : 0;
+
+    const reportedTotal = cashToBankExpected + b2cOnlineExpected + onlineSalesExpected + b2bExpected;
 
     const cashDep = Number(verifInputs?.cashDeposited) || 0;
     const onlinePay = Number(verifInputs?.onlinePayments) || 0;
     const salesRecv = isOnlineEnabled ? (Number(verifInputs?.onlineSalesReceivedAmount) || 0) : 0;
-    const approvedExpenses = Number(record.approvedExpensesAmount) || 0;
-    const verifiedTotal = cashDep + onlinePay + salesRecv + approvedExpenses;
+    const onlineComm = isOnlineEnabled ? (Number(verifInputs?.onlineSalesCommission) || 0) : 0;
+    
+    const verifiedTotal = cashDep + onlinePay + salesRecv + onlineComm + b2bExpected;
 
     const difference = reportedTotal - verifiedTotal;
 
@@ -337,6 +363,7 @@ const FinancePage: React.FC = () => {
     if (rec.verification?.cashDeposited > 0 || rec.verification?.onlinePayments > 0 || rec.verification?.onlineSalesReceivedAmount > 0 || rec.verification?.aggregatorAmountReceived > 0) {
       return { text: 'ACKNOWLEDGEMENT PENDING', class: 'status-pending', icon: <Clock size={12} /> };
     }
+    if (rec.cooApproved) return { text: 'PENDING RECONCILIATION', class: 'status-pending', icon: <Clock size={12} /> };
     return { text: 'USER CLOSED SALES', class: 'status-closed', icon: <Lock size={12} /> };
   };
 
@@ -350,37 +377,30 @@ const FinancePage: React.FC = () => {
             <h1>FINANCIAL CONSOLE</h1>
             <p className="subtitle">
               {activeTab === 'location' && `DAILY REVENUE LOGS: ${selectedLoc?.name?.toUpperCase() || ''}`}
-              {activeTab === 'stock_purchases' && 'VENDOR BILL PAYMENT RECONCILIATIONS'}
             </p>
           </div>
         </header>
 
-        {/* Top Navigation Tabs */}
-        <div className="tabs-header" style={{ display: 'flex', borderBottom: '1px solid var(--border-main)', marginBottom: '20px', flexWrap: 'wrap', gap: '4px' }}>
-          <button 
-            className={`tab-link ${activeTab === 'location' ? 'active' : ''}`}
-            onClick={() => setActiveTab('location')}
-            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'location' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'location' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
-          >
-            SALES RECONCILIATION {selectedLoc ? `(${selectedLoc.name.toUpperCase()})` : ''}
-          </button>
-          
-          <button 
-            className={`tab-link ${activeTab === 'stock_purchases' ? 'active' : ''}`}
-            onClick={() => setActiveTab('stock_purchases')}
-            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'stock_purchases' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'stock_purchases' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
-          >
-            STOCK PURCHASES
-          </button>
+        {/* Top Navigation Tabs — only shown for location/function_orders; bank master & dashboard use sidebar */}
+        {(activeTab === 'location' || activeTab === 'function_orders') && (
+          <div className="tabs-header" style={{ display: 'flex', borderBottom: '1px solid var(--border-main)', marginBottom: '20px', flexWrap: 'wrap', gap: '4px' }}>
+            <button 
+              className={`tab-link ${activeTab === 'location' ? 'active' : ''}`}
+              onClick={() => setActiveTab('location')}
+              style={{ background: 'none', border: 'none', borderBottom: activeTab === 'location' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'location' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
+            >
+              SALES RECONCILIATION {selectedLoc ? `(${selectedLoc.name.toUpperCase()})` : ''}
+            </button>
 
-          <button 
-            className={`tab-link ${activeTab === 'function_orders' ? 'active' : ''}`}
-            onClick={() => setActiveTab('function_orders')}
-            style={{ background: 'none', border: 'none', borderBottom: activeTab === 'function_orders' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'function_orders' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
-          >
-            FUNCTION ORDERS
-          </button>
-        </div>
+            <button 
+              className={`tab-link ${activeTab === 'function_orders' ? 'active' : ''}`}
+              onClick={() => setActiveTab('function_orders')}
+              style={{ background: 'none', border: 'none', borderBottom: activeTab === 'function_orders' ? '2px solid var(--primary)' : '2px solid transparent', color: activeTab === 'function_orders' ? 'var(--primary)' : 'var(--text-dim)', fontSize: '0.72rem', fontWeight: 800, padding: '12px 20px', cursor: 'pointer' }}
+            >
+              FUNCTION ORDERS
+            </button>
+          </div>
+        )}
 
         {error && (
           <div className="alert alert-error">
@@ -397,94 +417,226 @@ const FinancePage: React.FC = () => {
         )}
 
         {/* ─── TAB 1: FINANCIAL DASHBOARD ───────────────────────────────── */}
-        {activeTab === 'dashboard' && dashboardStats && (
+        {activeTab === 'dashboard' && (
           <div className="finance-tab-content">
-            <section className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-icon reported"><DollarSign size={22} /></div>
-                <div className="stat-info">
-                  <label>REPORTED REVENUE (MONTH)</label>
-                  <h3>₹ {dashboardStats.totalReported?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-icon verified"><CheckCircle2 size={22} /></div>
-                <div className="stat-info">
-                  <label>VERIFIED DEPOSITS</label>
-                  <h3>₹ {dashboardStats.totalVerified?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className={`stat-icon difference ${dashboardStats.totalDifference !== 0 ? 'gap' : 'reconciled'}`}>
-                  {dashboardStats.totalDifference !== 0 ? <ShieldAlert size={22} /> : <CheckCircle2 size={22} />}
-                </div>
-                <div className="stat-info">
-                  <label>UNRECONCILED DIFFERENCE</label>
-                  <h3 className={dashboardStats.totalDifference !== 0 ? "text-error" : "text-success"}>
-                    ₹ {dashboardStats.totalDifference?.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </h3>
-                </div>
-              </div>
-            </section>
 
-            <div className="dashboard-layout-split">
-              <div className="panel action-panel">
-                <div className="panel-header">
-                  <h2><Clock size={16} /> PENDING RECONCILIATIONS ({dashboardStats.pendingReconciliations?.length || 0})</h2>
+            {/* ── ROW 0: Notification Bar ── */}
+            {(() => {
+              const pendingRecon = dashboardStats?.pendingReconciliations?.length || 0;
+              const pendingStock = bills.filter((b: any) => b.paymentStatus !== 'PAID' && b.deliveryStatus === 'DELIVERED').length;
+              const pendingFO = (pendingAdvances?.length || 0) + (pendingFinalPayments?.length || 0);
+              const hasAlerts = pendingRecon > 0 || pendingStock > 0 || pendingFO > 0;
+              return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 18px', marginBottom: '20px',
+                  background: hasAlerts ? 'rgba(239,68,68,0.07)' : 'rgba(16,185,129,0.07)',
+                  border: hasAlerts ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(16,185,129,0.25)',
+                  borderRadius: '4px', flexWrap: 'wrap'
+                }}>
+                  {hasAlerts
+                    ? <AlertCircle size={15} style={{ color: '#f87171', flexShrink: 0 }} />
+                    : <CheckCircle2 size={15} style={{ color: '#34d399', flexShrink: 0 }} />
+                  }
+                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: hasAlerts ? '#f87171' : '#34d399', textTransform: 'uppercase' }}>
+                    {hasAlerts ? 'Action Required' : 'All Clear'}
+                  </span>
+                  {pendingRecon > 0 && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, background: 'rgba(239,68,68,0.12)', color: '#f87171', border: '1px solid rgba(239,68,68,0.3)', padding: '2px 10px', borderRadius: '20px' }}>
+                      {pendingRecon} Reconciliation{pendingRecon !== 1 ? 's' : ''} Pending
+                    </span>
+                  )}
+                  {pendingStock > 0 && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', border: '1px solid rgba(245,158,11,0.3)', padding: '2px 10px', borderRadius: '20px' }}>
+                      {pendingStock} Stock Payment{pendingStock !== 1 ? 's' : ''} Due
+                    </span>
+                  )}
+                  {pendingFO > 0 && (
+                    <span style={{ fontSize: '0.7rem', fontWeight: 700, background: 'rgba(99,102,241,0.12)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 10px', borderRadius: '20px' }}>
+                      {pendingFO} Function Order{pendingFO !== 1 ? 's' : ''} Due
+                    </span>
+                  )}
+                  {!hasAlerts && (
+                    <span style={{ fontSize: '0.7rem', color: '#34d399' }}>No pending actions across all locations.</span>
+                  )}
                 </div>
-                
-                <div className="table-wrapper scroll-inside">
-                  <table className="sharp-table">
-                    <thead>
+              );
+            })()}
+
+            {/* ── ROW 1: 5 KPI Summary Cards (current week) ── */}
+            {(() => {
+              const now = new Date();
+              const dayOfWeek = now.getDay(); // 0=Sun
+              const startOfWeek = new Date(now);
+              startOfWeek.setDate(now.getDate() - dayOfWeek);
+              startOfWeek.setHours(0, 0, 0, 0);
+
+              const pendingRecon = dashboardStats?.pendingReconciliations?.length || 0;
+              const pendingStock = bills.filter((b: any) => b.paymentStatus !== 'PAID' && b.deliveryStatus === 'DELIVERED').length;
+              const paidThisWeek = bills.filter((b: any) => b.paymentStatus === 'PAID' && new Date(b.updatedAt || b.createdAt) >= startOfWeek).length;
+              const pendingFO = (pendingAdvances?.length || 0) + (pendingFinalPayments?.length || 0);
+              const totalVerified = dashboardStats?.totalVerified || 0;
+
+              const cards = [
+                { label: 'Pending Reconciliations', value: pendingRecon, unit: 'entries', color: pendingRecon > 0 ? '#f87171' : '#34d399', icon: <Clock size={18} /> },
+                { label: 'Stock Payments Due', value: pendingStock, unit: 'bills', color: pendingStock > 0 ? '#f59e0b' : '#34d399', icon: <Package size={18} /> },
+                { label: 'Stock Bills Paid (This Week)', value: paidThisWeek, unit: 'bills', color: '#34d399', icon: <CheckCircle2 size={18} /> },
+                { label: 'Function Orders Due', value: pendingFO, unit: 'orders', color: pendingFO > 0 ? '#818cf8' : '#34d399', icon: <FileText size={18} /> },
+                { label: 'Total Verified Revenue', value: `₹ ${totalVerified.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`, unit: '', color: '#f97316', icon: <DollarSign size={18} /> },
+              ];
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '28px' }}>
+                  {cards.map((card, i) => (
+                    <div key={i} style={{
+                      padding: '18px 16px',
+                      background: 'var(--bg-card)',
+                      border: `1.5px solid ${card.color}30`,
+                      borderTop: `3px solid ${card.color}`,
+                      display: 'flex', flexDirection: 'column', gap: '10px',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.06)'
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <span style={{ fontSize: '0.62rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.6px', lineHeight: 1.3 }}>{card.label}</span>
+                        <span style={{ color: card.color, opacity: 0.75, flexShrink: 0, marginLeft: '6px' }}>{card.icon}</span>
+                      </div>
+                      <div style={{ fontSize: typeof card.value === 'string' ? '1.15rem' : '2.1rem', fontWeight: 900, color: card.color, fontFamily: "'Outfit', sans-serif", lineHeight: 1 }}>
+                        {card.value}
+                      </div>
+                      {card.unit && <span style={{ fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{card.unit}</span>}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* ── ROW 2: Location-wise Stacked Horizontal Bar Chart + Summary Table ── */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+
+              {/* Chart panel */}
+              <div style={{ padding: '22px', background: 'var(--bg-card)', border: '1px solid var(--border-main)', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid var(--border-main)' }}>
+                  <TrendingUp size={15} style={{ color: 'var(--primary)' }} />
+                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Pending Reconciliations by Location
+                  </span>
+                </div>
+                {(() => {
+                  if (!dashboardStats?.pendingReconciliations || dashboardStats.pendingReconciliations.length === 0) {
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '160px', gap: '8px' }}>
+                        <CheckCircle2 size={32} style={{ color: '#34d399' }} />
+                        <p style={{ fontSize: '0.78rem', color: '#34d399', fontWeight: 700 }}>All reconciled!</p>
+                      </div>
+                    );
+                  }
+
+                  // Group pending reconciliations by location
+                  const byLoc: Record<string, { name: string; count: number; pending: number; total: number }> = {};
+                  dashboardStats.pendingReconciliations.forEach((pr: any) => {
+                    const key = pr.locationId;
+                    if (!byLoc[key]) byLoc[key] = { name: pr.locationName, count: 0, pending: 0, total: 0 };
+                    byLoc[key].count += 1;
+                    byLoc[key].pending += Math.abs(pr.difference || 0);
+                    byLoc[key].total += pr.reportedTotal || 0;
+                  });
+
+                  const locEntries = Object.values(byLoc);
+                  const maxTotal = Math.max(...locEntries.map(l => l.total), 1);
+
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {locEntries.map((loc, i) => {
+                        const reconPct = (loc.pending / maxTotal) * 100;
+                        const verifiedPct = ((loc.total - loc.pending) / maxTotal) * 100;
+                        return (
+                          <div key={i}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <span style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-main)' }}>{loc.name.toUpperCase()}</span>
+                              <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 700 }}>{loc.count} pending</span>
+                            </div>
+                            <div style={{ display: 'flex', height: '18px', borderRadius: '2px', overflow: 'hidden', background: 'var(--bg-main)' }}>
+                              <div style={{ width: `${verifiedPct}%`, background: '#10b981', transition: 'width 0.6s ease' }} title={`Verified: ₹${(loc.total - loc.pending).toFixed(0)}`} />
+                              <div style={{ width: `${reconPct}%`, background: '#f87171', transition: 'width 0.6s ease' }} title={`Pending: ₹${loc.pending.toFixed(0)}`} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', gap: '16px', marginTop: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ width: '10px', height: '10px', background: '#10b981', borderRadius: '2px' }} />
+                          <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 700 }}>Verified</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ width: '10px', height: '10px', background: '#f87171', borderRadius: '2px' }} />
+                          <span style={{ fontSize: '0.6rem', color: 'var(--text-dim)', fontWeight: 700 }}>Pending Reconciliation</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Summary table panel */}
+              <div style={{ padding: '22px', background: 'var(--bg-card)', border: '1px solid var(--border-main)', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', paddingBottom: '12px', borderBottom: '1px solid var(--border-main)' }}>
+                  <Building2 size={15} style={{ color: 'var(--primary)' }} />
+                  <span style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Pending Items by Location
+                  </span>
+                </div>
+                <table className="sharp-table" style={{ fontSize: '0.72rem' }}>
+                  <thead>
+                    <tr>
+                      <th>LOCATION</th>
+                      <th style={{ textAlign: 'center' }}>RECON</th>
+                      <th style={{ textAlign: 'center' }}>STOCK PMT</th>
+                      <th style={{ textAlign: 'center' }}>FO DUE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {locations.map((loc: any) => {
+                      const reconCount = dashboardStats?.pendingReconciliations?.filter((pr: any) => pr.locationId === loc._id).length || 0;
+                      const stockDue = bills.filter((b: any) => {
+                        const destId = b.destinationLocation?._id || b.destinationLocation;
+                        return destId === loc._id && b.paymentStatus !== 'PAID' && b.deliveryStatus === 'DELIVERED';
+                      }).length;
+                      const foDue = [...(pendingAdvances || []), ...(pendingFinalPayments || [])].filter((fo: any) => {
+                        return fo.location === loc._id || fo.location?._id === loc._id;
+                      }).length;
+                      return (
+                        <tr key={loc._id}>
+                          <td><strong>{loc.name.toUpperCase()}</strong><br /><span style={{ fontSize: '0.6rem', color: 'var(--text-dim)' }}>{loc.role}</span></td>
+                          <td style={{ textAlign: 'center' }}>
+                            {reconCount > 0
+                              ? <span style={{ color: '#f87171', fontWeight: 900 }}>{reconCount}</span>
+                              : <span style={{ color: '#34d399' }}>✓</span>}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {stockDue > 0
+                              ? <span style={{ color: '#f59e0b', fontWeight: 900 }}>{stockDue}</span>
+                              : <span style={{ color: '#34d399' }}>✓</span>}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            {foDue > 0
+                              ? <span style={{ color: '#818cf8', fontWeight: 900 }}>{foDue}</span>
+                              : <span style={{ color: '#34d399' }}>✓</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {locations.length === 0 && (
                       <tr>
-                        <th>LOCATION</th>
-                        <th>DATE</th>
-                        <th>REPORTED TOTAL</th>
-                        <th>VERIFIED TOTAL</th>
-                        <th>MISMATCH</th>
-                        <th className="text-right">ACTION</th>
+                        <td colSpan={4} className="empty-state">No sale locations found.</td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {dashboardStats.pendingReconciliations?.map((pr: any, idx: number) => (
-                        <tr key={idx}>
-                          <td>
-                            <strong>{pr.locationName?.toUpperCase()}</strong>
-                            <span className="subtext">{pr.locationRole}</span>
-                          </td>
-                          <td>{new Date(pr.date).toLocaleDateString()}</td>
-                          <td>₹ {pr.reportedTotal?.toFixed(2)}</td>
-                          <td>₹ {pr.verifiedTotal?.toFixed(2)}</td>
-                          <td>
-                            <span className={`mismatch-badge ${pr.difference !== 0 ? 'active' : 'reconciled'}`}>
-                              ₹ {pr.difference?.toFixed(2)}
-                            </span>
-                          </td>
-                          <td className="text-right">
-                            <a 
-                              className="action-btn-mini"
-                              href={`/finance?tab=location&locationId=${pr.locationId}`}
-                            >
-                              Go Reconcile <ChevronRight size={12} />
-                            </a>
-                          </td>
-                        </tr>
-                      ))}
-                      {(!dashboardStats.pendingReconciliations || dashboardStats.pendingReconciliations.length === 0) && (
-                        <tr>
-                          <td colSpan={6} className="empty-state">
-                            <CheckCircle2 size={24} className="text-success" />
-                            <p>All locations are reconciled and acknowledged!</p>
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
+
           </div>
         )}
+
 
         {/* ─── TAB 2: REVENUE BY LOCATION (ACCORDION CARDS) ───────────────── */}
         {activeTab === 'location' && (
@@ -516,6 +668,13 @@ const FinancePage: React.FC = () => {
                       B2B Dispatches
                     </button>
                   )}
+                  <button 
+                    className={`sub-tab-btn ${logTab === 'stock_purchases' ? 'active' : ''}`}
+                    onClick={() => setLogTab('stock_purchases')}
+                  >
+                    <Package size={13} style={{ marginRight: '5px', verticalAlign: 'middle' }} />
+                    Stock Purchases
+                  </button>
                 </div>
 
                 <div className="logs-accordion-container">
@@ -527,7 +686,6 @@ const FinancePage: React.FC = () => {
                         const isAck = rec.verification?.isAcknowledged;
                         const isOnlineEnabled = selectedLocRole !== 'AGGREGATE' && !!selectedLoc?.onlineSalesEnabled;
                         const math = getReconciliationMath(rec, verif, selectedLocRole, isOnlineEnabled);
-                        const expectedOnline = calculateOnlineExpected(rec, selectedLocRole);
                         const b2bTotal = rec.b2bSales?.reduce((s: number, item: any) => s + (item.totalVal || 0), 0) || 0;
                         const b2cExpected = rec.b2cSales?.reduce((s: number, item: any) => s + (item.totalVal || 0), 0) || 0;
                         const isExpanded = expandedDate === rec.date;
@@ -601,17 +759,17 @@ const FinancePage: React.FC = () => {
                                           <strong>₹ {b2cExpected.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         <div className="field-row">
-                                          <span>B2C Cash Received</span>
-                                          <strong>₹ {(rec.reportedCash || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                          <span>Expected Cash to Bank</span>
+                                          <strong>₹ {(rec.cashClosure?.cashDepositedToBank || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         <div className="field-row">
-                                          <span>B2C Online Received</span>
+                                          <span>B2C Online Sales</span>
                                           <strong>₹ {(rec.reportedOnline || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                         </div>
                                         {isOnlineEnabled && (
                                           <div className="field-row">
-                                            <span>Online Sales (Expected Net Payout)</span>
-                                            <strong>₹ {expectedOnline.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
+                                            <span>Online Sales Amount</span>
+                                            <strong>₹ {(rec.onlineSales?.totalSaleValue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
                                           </div>
                                         )}
                                         {isB2BLocation && (
@@ -621,14 +779,8 @@ const FinancePage: React.FC = () => {
                                           </div>
                                         )}
                                         <div className="field-row divider-row">
-                                          <span>Reported Total</span>
+                                          <span>Expected Total</span>
                                           <strong className="text-primary font-large">₹ {math.reportedTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
-                                        </div>
-                                        <div className="field-row">
-                                          <span>Counter Sale Mismatch</span>
-                                          <strong className={(rec.reportedDifference || 0) !== 0 ? "text-error" : "text-success"}>
-                                            ₹ {(rec.reportedDifference || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                          </strong>
                                         </div>
                                       </div>
                                     )}
@@ -637,6 +789,27 @@ const FinancePage: React.FC = () => {
                                   {/* Box 2: Verification */}
                                   <div className="detail-data-box verification-box">
                                     <h3>VERIFICATION DETAILS (FINANCE)</h3>
+                                    
+                                    {bankDetails && (
+                                      <div style={{ 
+                                        background: 'rgba(255,255,255,0.02)', 
+                                        border: '1px solid var(--border-main)', 
+                                        padding: '12px', 
+                                        borderRadius: '4px', 
+                                        marginBottom: '16px' 
+                                      }}>
+                                        <div style={{ fontSize: '0.62rem', color: 'var(--text-dim)', fontWeight: 800, textTransform: 'uppercase', marginBottom: '4px' }}>
+                                          Location Bank Account Info
+                                        </div>
+                                        <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                                          {bankDetails.bankName} | A/C: {bankDetails.accountNumber}
+                                        </div>
+                                        <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)', marginTop: '2px' }}>
+                                          IFSC: {bankDetails.ifscCode} {bankDetails.branchName ? `| Branch: ${bankDetails.branchName}` : ''}
+                                        </div>
+                                      </div>
+                                    )}
+
                                     {isAck ? (
                                       <div className="box-fields-list">
                                         {selectedLocRole === 'AGGREGATE' ? (
@@ -939,6 +1112,136 @@ const FinancePage: React.FC = () => {
                   )}
 
                   {/* Expenses tab content is removed */}
+
+                  {/* ── STOCK PURCHASES SUB-TAB ── */}
+                  {logTab === 'stock_purchases' && (
+                    <div style={{ padding: '8px 0' }}>
+                      {/* Date filter */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                        <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-dim)', textTransform: 'uppercase' }}>
+                          Filter by Date
+                        </label>
+                        <input
+                          type="date"
+                          value={stockDateFilter}
+                          onChange={e => setStockDateFilter(e.target.value)}
+                          style={{ padding: '6px 10px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', fontSize: '0.8rem' }}
+                        />
+                        {stockDateFilter && (
+                          <button
+                            onClick={() => setStockDateFilter('')}
+                            style={{ fontSize: '0.7rem', color: 'var(--primary)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 700 }}
+                          >
+                            ✕ Clear
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="table-wrapper">
+                        <table className="sharp-table">
+                          <thead>
+                            <tr>
+                              <th>PR CODE</th>
+                              <th>VENDOR</th>
+                              <th>DATE</th>
+                              <th>TOTAL AMOUNT</th>
+                              <th>DELIVERY</th>
+                              <th>PAYMENT</th>
+                              <th>ACTIONS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(() => {
+                              const locBills = bills.filter((b: any) => {
+                                const matchLoc = b.destinationLocation === selectedLocationId ||
+                                  b.destinationLocation?._id === selectedLocationId;
+                                if (!matchLoc) return false;
+                                if (stockDateFilter) {
+                                  const billDate = new Date(b.createdAt).toLocaleDateString('en-CA');
+                                  return billDate === stockDateFilter;
+                                }
+                                return true;
+                              });
+
+                              if (locBills.length === 0) {
+                                return (
+                                  <tr>
+                                    <td colSpan={7} className="empty-state">
+                                      No stock purchases found{stockDateFilter ? ` for ${new Date(stockDateFilter).toLocaleDateString()}` : ' for this location'}.
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              return locBills.map((b: any) => {
+                                const isPaid = b.paymentStatus === 'PAID';
+                                const isDelivered = b.deliveryStatus === 'DELIVERED';
+                                return (
+                                  <tr key={b._id}>
+                                    <td>
+                                      <strong className="code-badge" style={{ fontSize: '0.7rem', color: 'var(--primary)' }}>
+                                        {b.purchaseRequest?.prCode || '—'}
+                                      </strong>
+                                    </td>
+                                    <td><strong>{b.vendor?.vendorName || '—'}</strong></td>
+                                    <td style={{ fontSize: '0.78rem' }}>{new Date(b.createdAt).toLocaleDateString()}</td>
+                                    <td>
+                                      <strong style={{ fontFamily: 'monospace' }}>
+                                        ₹ {(b.totalAmount || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                      </strong>
+                                    </td>
+                                    <td>
+                                      <span style={{
+                                        fontSize: '0.65rem', fontWeight: 800, padding: '2px 7px',
+                                        background: isDelivered ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)',
+                                        color: isDelivered ? '#34d399' : '#f59e0b',
+                                        border: isDelivered ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(245,158,11,0.3)'
+                                      }}>
+                                        {isDelivered ? '✓ DELIVERED' : 'PENDING'}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span style={{
+                                        fontSize: '0.65rem', fontWeight: 800, padding: '2px 7px',
+                                        background: isPaid ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.12)',
+                                        color: isPaid ? '#34d399' : '#f87171',
+                                        border: isPaid ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(239,68,68,0.25)'
+                                      }}>
+                                        {isPaid ? '✓ PAID' : 'PAYMENT DUE'}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <div style={{ display: 'flex', gap: '6px' }}>
+                                        <button
+                                          className="btn-action-sm"
+                                          onClick={() => setSelectedBillForView(b)}
+                                          style={{ fontSize: '0.65rem', padding: '4px 10px' }}
+                                        >
+                                          <FileText size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                                          VIEW
+                                        </button>
+                                        {!isPaid && isDelivered && (
+                                          <button
+                                            className="btn-action-sm"
+                                            onClick={() => handleMarkBillPaid(b._id)}
+                                            disabled={isSubmitting}
+                                            style={{ fontSize: '0.65rem', padding: '4px 10px', background: '#10b981', border: 'none', color: 'white' }}
+                                          >
+                                            <DollarSign size={11} style={{ marginRight: '4px', verticalAlign: 'middle' }} />
+                                            MARK PAID
+                                          </button>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            })()}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
@@ -1089,13 +1392,19 @@ const FinancePage: React.FC = () => {
                   className={`sub-tab-btn ${foSubTab === 'advances' ? 'active' : ''}`}
                   onClick={() => setFoSubTab('advances')}
                 >
-                  ADVANCE PAYMENTS RECONCILIATION ({pendingAdvances.length})
+                  ADVANCE PAYMENTS ({pendingAdvances.length} pending)
                 </button>
                 <button 
                   className={`sub-tab-btn ${foSubTab === 'final_payments' ? 'active' : ''}`}
                   onClick={() => setFoSubTab('final_payments')}
                 >
-                  SETTLEMENT / FINAL PAYMENTS ({pendingFinalPayments.length})
+                  FINAL SETTLEMENTS ({pendingFinalPayments.length} pending)
+                </button>
+                <button 
+                  className={`sub-tab-btn ${foSubTab === 'all_orders' ? 'active' : ''}`}
+                  onClick={() => setFoSubTab('all_orders')}
+                >
+                  ALL ORDERS HISTORY ({allFunctionOrders.length})
                 </button>
               </div>
 
@@ -1234,6 +1543,93 @@ const FinancePage: React.FC = () => {
                               </td>
                             </tr>
                           ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* ── ALL ORDERS HISTORY ── */}
+                {foSubTab === 'all_orders' && (
+                  <div className="table-wrapper scroll-inside">
+                    <table className="sharp-table">
+                      <thead>
+                        <tr>
+                          <th>FO CODE</th>
+                          <th>LOCATION</th>
+                          <th>BOOKING DATE</th>
+                          <th>ADVANCE</th>
+                          <th>ADVANCE RECON</th>
+                          <th>FINAL PMT</th>
+                          <th>FINAL RECON</th>
+                          <th>ORDER STATUS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allFunctionOrders.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="empty-state">No function orders found.</td>
+                          </tr>
+                        ) : (
+                          allFunctionOrders.map((order: any) => {
+                            const advanceAck = order.advanceFinanceAcknowledged;
+                            const finalAck = order.finalFinanceAcknowledged;
+                            const hasAdvance = (order.advanceAmount || 0) > 0;
+                            const isSettled = ['SETTLED', 'CLOSED', 'COMPLETED'].includes(order.status);
+                            return (
+                              <tr key={order._id}>
+                                <td><strong>{order.foCode}</strong></td>
+                                <td>{order.centerId?.name?.toUpperCase() || 'UNKNOWN'}</td>
+                                <td>{order.bookingDate ? new Date(order.bookingDate).toLocaleDateString() : '—'}</td>
+                                <td className="font-numeric">
+                                  {hasAdvance
+                                    ? `₹ ${(order.advanceAmount || 0).toFixed(2)}`
+                                    : <span style={{ color: 'var(--text-dim)', fontSize: '0.72rem' }}>Not paid</span>}
+                                </td>
+                                <td>
+                                  {!hasAdvance ? (
+                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>N/A</span>
+                                  ) : advanceAck ? (
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#34d399', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', border: '1px solid rgba(16,185,129,0.25)' }}>
+                                      ✓ RECONCILED
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', border: '1px solid rgba(245,158,11,0.25)' }}>
+                                      PENDING
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="font-numeric">
+                                  {isSettled
+                                    ? `₹ ${(order.finalPaymentAmount || order.totalOrderValue || 0).toFixed(2)}`
+                                    : <span style={{ color: 'var(--text-dim)', fontSize: '0.72rem' }}>Not settled</span>}
+                                </td>
+                                <td>
+                                  {!isSettled ? (
+                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-dim)' }}>N/A</span>
+                                  ) : finalAck ? (
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#34d399', background: 'rgba(16,185,129,0.1)', padding: '2px 8px', border: '1px solid rgba(16,185,129,0.25)' }}>
+                                      ✓ RECONCILED
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#f59e0b', background: 'rgba(245,158,11,0.1)', padding: '2px 8px', border: '1px solid rgba(245,158,11,0.25)' }}>
+                                      PENDING
+                                    </span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span style={{
+                                    fontSize: '0.65rem', fontWeight: 800, padding: '2px 8px',
+                                    background: order.status === 'COMPLETED' ? 'rgba(16,185,129,0.1)' : 'rgba(99,102,241,0.1)',
+                                    color: order.status === 'COMPLETED' ? '#34d399' : '#818cf8',
+                                    border: order.status === 'COMPLETED' ? '1px solid rgba(16,185,129,0.25)' : '1px solid rgba(99,102,241,0.25)'
+                                  }}>
+                                    {order.status || 'ACTIVE'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })
                         )}
                       </tbody>
                     </table>
@@ -1415,6 +1811,22 @@ const FinancePage: React.FC = () => {
         .reject-btn { border-color: #ef4444; color: #ef4444; }
         .reject-btn:hover { background: rgba(239,68,68,0.1) !important; color: #ef4444 !important; }
       `}</style>
+
+      {/* Bill View Modal — Finance read-only view with Mark Paid option */}
+      {selectedBillForView && (
+        <BillViewModal
+          bill={selectedBillForView}
+          isViewOnly={true}
+          showMarkPaid={true}
+          isInternal={false}
+          onClose={() => setSelectedBillForView(null)}
+          onMarkPaid={(billId) => {
+            handleMarkBillPaid(billId);
+            setSelectedBillForView(null);
+          }}
+          isProcessing={isSubmitting}
+        />
+      )}
     </MainLayout>
   );
 };

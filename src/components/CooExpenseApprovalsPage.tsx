@@ -76,7 +76,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
     if (closureExpenses[closure._id]) return; // already loaded
 
     try {
-      const dateStr = closure.date.split('T')[0];
+      const dateStr = new Date(closure.date).toLocaleDateString('en-CA');
       const res = await expenseApi.getAll({
         locationId: closure.locationId._id,
         startDate: dateStr,
@@ -214,7 +214,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
       
       await revenueApi.cooApproveCashClosure({
         locationId: closure.locationId._id,
-        date: closure.date.split('T')[0],
+        date: new Date(closure.date).toLocaleDateString('en-CA'),
         approvedExpenses,
         closureUpdates,
         b2cSales,
@@ -242,7 +242,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
   // Apply filters
   const filteredClosures = pendingClosures.filter(c => {
     const matchLoc = selectedLocation === 'all' || c.locationId?._id === selectedLocation;
-    const matchDate = !selectedDate || c.date.split('T')[0] === selectedDate;
+    const matchDate = !selectedDate || new Date(c.date).toLocaleDateString('en-CA') === selectedDate;
     return matchLoc && matchDate;
   });
 
@@ -387,13 +387,14 @@ const CooExpenseApprovalsPage: React.FC = () => {
                   <th>DATE</th>
                   <th>EXPECTED TOTAL (₹)</th>
                   <th>DECLARED TOTAL (₹)</th>
+                  <th>STATUS</th>
                   <th style={{ textAlign: 'center' }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredClosures.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="empty-state">
+                    <td colSpan={8} className="empty-state">
                       <Check size={24} className="text-success" />
                       <p>{pendingClosures.length === 0 ? 'All day closures reviewed and approved!' : 'No day closures match your filter criteria.'}</p>
                     </td>
@@ -458,6 +459,36 @@ const CooExpenseApprovalsPage: React.FC = () => {
                           <td>{new Date(closure.date).toLocaleDateString()}</td>
                           <td className="font-numeric">₹ {expectedTotal.toFixed(2)}</td>
                           <td className="font-numeric">₹ {declaredTotal.toFixed(2)}</td>
+                          <td>
+                            {closure.financeReconciled ? (
+                              <span className="badge-status-closed" style={{
+                                background: 'rgba(16,185,129,0.1)',
+                                color: '#10b981',
+                                border: '1px solid rgba(16,185,129,0.2)',
+                                padding: '4px 10px',
+                                fontSize: '0.65rem',
+                                fontWeight: 800
+                              }}>CLOSED</span>
+                            ) : closure.cooApproved ? (
+                              <span className="badge-status-finance" style={{
+                                background: 'rgba(59,130,246,0.1)',
+                                color: '#3b82f6',
+                                border: '1px solid rgba(59,130,246,0.2)',
+                                padding: '4px 10px',
+                                fontSize: '0.65rem',
+                                fontWeight: 800
+                              }}>PENDING FINANCE</span>
+                            ) : (
+                              <span className="badge-status-coo" style={{
+                                background: 'rgba(249,115,22,0.1)',
+                                color: '#f97316',
+                                border: '1px solid rgba(249,115,22,0.2)',
+                                padding: '4px 10px',
+                                fontSize: '0.65rem',
+                                fontWeight: 800
+                              }}>PENDING COO</span>
+                            )}
+                          </td>
                           <td style={{ textAlign: 'center' }}>
                             <button 
                               className={`btn-action-mini ${isExpanded ? 'reject' : 'approve'}`}
@@ -475,7 +506,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                         
                         {isExpanded && (
                           <tr>
-                            <td colSpan={7} style={{ padding: '0 20px 20px 20px', background: 'rgba(255,255,255,0.01)' }}>
+                            <td colSpan={8} style={{ padding: '0 20px 20px 20px', background: 'rgba(255,255,255,0.01)' }}>
                               <div style={{ border: '1px solid var(--border-main)', padding: '24px', background: 'var(--bg-main)', marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
                                 
                                 {/* 1. B2C Sales grid (Editable) */}
@@ -510,7 +541,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                                 style={{ width: '80px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '4px' }}
                                                 value={item.soldQty}
                                                 onChange={(e) => handleB2cSaleQtyChange(closure._id, idx, e.target.value)}
-                                                disabled={isProcessing}
+                                                disabled={isProcessing || closure.cooApproved}
                                                 min="0"
                                               />
                                             </td>
@@ -521,7 +552,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                                 style={{ width: '80px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '4px' }}
                                                 value={item.unitPrice}
                                                 onChange={(e) => handleB2cSalePriceChange(closure._id, idx, e.target.value)}
-                                                disabled={isProcessing}
+                                                disabled={isProcessing || closure.cooApproved}
                                                 min="0"
                                                 step="0.01"
                                               />
@@ -562,7 +593,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                                 style={{ width: '80px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '4px' }}
                                                 value={item.quantity}
                                                 onChange={(e) => handleB2bSaleQtyChange(closure._id, idx, e.target.value)}
-                                                disabled={isProcessing}
+                                                disabled={isProcessing || closure.cooApproved}
                                                 min="0"
                                               />
                                             </td>
@@ -573,7 +604,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                                 style={{ width: '80px', background: 'var(--bg-sidebar)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '4px' }}
                                                 value={item.unitPrice}
                                                 onChange={(e) => handleB2bSalePriceChange(closure._id, idx, e.target.value)}
-                                                disabled={isProcessing}
+                                                disabled={isProcessing || closure.cooApproved}
                                                 min="0"
                                                 step="0.01"
                                               />
@@ -643,6 +674,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={prevDay || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'prevDayCashInHand', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>₹ {prevDay.toFixed(2)}</div>
@@ -656,6 +688,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={sales || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'cashFoodSales', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>₹ {sales.toFixed(2)}</div>
@@ -669,6 +702,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={advPay || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'advancePaymentsReceived', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>₹ {advPay.toFixed(2)}</div>
@@ -682,6 +716,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={foFinal || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'functionOrderFinalPayments', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>₹ {foFinal.toFixed(2)}</div>
@@ -696,6 +731,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={advTaken || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'advanceCashTaken', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: '#10b981', marginTop: '4px' }}>₹ {advTaken.toFixed(2)}</div>
@@ -709,6 +745,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={toBank || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'cashDepositedToBank', e.target.value)}
                                             style={{ width: '100%', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900, marginTop: '4px', boxSizing: 'border-box' }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <div style={{ fontSize: '1rem', fontWeight: 900, color: '#ef4444', marginTop: '4px' }}>₹ {toBank.toFixed(2)}</div>
@@ -738,6 +775,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                             value={actual || ''}
                                             onChange={(e) => handleFieldChange(closure._id, 'cashInHand', e.target.value)}
                                             style={{ width: '150px', background: 'var(--bg-main)', border: '1px solid var(--border-main)', color: 'var(--text-main)', padding: '6px', fontSize: '0.9rem', fontWeight: 900 }}
+                                            disabled={isProcessing || closure.cooApproved}
                                           />
                                         ) : (
                                           <strong style={{ fontSize: '1.1rem', color: 'var(--text-main)' }}>₹ {actual.toFixed(2)}</strong>
@@ -798,7 +836,7 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                                   onChange={(e) => handleApprovedAmountChange(exp._id, e.target.value)}
                                                   min="0"
                                                   step="0.01"
-                                                  disabled={isProcessing}
+                                                  disabled={isProcessing || closure.cooApproved}
                                                 />
                                               </div>
                                             </td>
@@ -810,34 +848,44 @@ const CooExpenseApprovalsPage: React.FC = () => {
                                 </div>
 
                                 {/* Actions Row */}
-                                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-main)', paddingTop: '16px' }}>
-                                  {!isAgg && (
-                                    editingClosureId === closure._id ? (
+                                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', borderTop: '1px solid var(--border-main)', paddingTop: '16px' }}>
+                                  {closure.cooApproved ? (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 16px', background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.3)' }}>
+                                      <span style={{ fontSize: '0.75rem', color: '#a855f7', fontWeight: 900 }}>
+                                        APPROVED BY COO {closure.financeReconciled && '(CLOSED & RECONCILED)'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {!isAgg && (
+                                        editingClosureId === closure._id ? (
+                                          <button 
+                                            className="btn-action-mini" 
+                                            onClick={() => setEditingClosureId(null)}
+                                            style={{ background: 'transparent', border: '1px solid var(--border-main)', color: 'var(--text-dim)', padding: '8px 16px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
+                                          >
+                                            CANCEL EDIT
+                                          </button>
+                                        ) : (
+                                          <button 
+                                            className="btn-action-mini" 
+                                            onClick={() => startEditingClosure(closure)}
+                                            style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid #3b82f6', color: '#3b82f6', padding: '8px 16px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
+                                          >
+                                            EDIT DETAILS
+                                          </button>
+                                        )
+                                      )}
                                       <button 
-                                        className="btn-action-mini" 
-                                        onClick={() => setEditingClosureId(null)}
-                                        style={{ background: 'transparent', border: '1px solid var(--border-main)', color: 'var(--text-dim)', padding: '8px 16px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
+                                        className="btn-action-mini approve"
+                                        onClick={() => handleApproveClosure(closure)}
+                                        disabled={isProcessing}
+                                        style={{ background: '#a855f7', color: 'white', padding: '8px 24px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
                                       >
-                                        CANCEL EDIT
+                                        {isProcessing ? 'PROCESSING...' : 'APPROVE DAY CLOSURE'}
                                       </button>
-                                    ) : (
-                                      <button 
-                                        className="btn-action-mini" 
-                                        onClick={() => startEditingClosure(closure)}
-                                        style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid #3b82f6', color: '#3b82f6', padding: '8px 16px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
-                                      >
-                                        EDIT DETAILS
-                                      </button>
-                                    )
+                                    </>
                                   )}
-                                  <button 
-                                    className="btn-action-mini approve"
-                                    onClick={() => handleApproveClosure(closure)}
-                                    disabled={isProcessing}
-                                    style={{ background: '#a855f7', color: 'white', padding: '8px 24px', fontSize: '0.75rem', fontWeight: 800, cursor: 'pointer' }}
-                                  >
-                                    {isProcessing ? 'PROCESSING...' : 'APPROVE DAY CLOSURE'}
-                                  </button>
                                 </div>
                                 
                               </div>
